@@ -1,0 +1,20 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<svg xmlns="http://www.w3.org/2000/svg" width="32" height="32" viewBox="0 0 32 32">
+  <!-- Cave Hermit -->
+  <!-- Body -->
+  <ellipse cx="16" cy="24" rx="6" ry="5" fill="#8B4513"/>
+  <!-- Robes -->
+  <rect x="10" y="18" width="12" height="10" rx="2" fill="#696969"/>
+  <!-- Head -->
+  <circle cx="16" cy="12" r="5" fill="#F5DEB3"/>
+  <!-- Beard -->
+  <ellipse cx="16" cy="16" rx="4" ry="3" fill="#DCDCDC"/>
+  <!-- Eyes -->
+  <circle cx="14" cy="10" r="1" fill="#000000"/>
+  <circle cx="18" cy="10" r="1" fill="#000000"/>
+  <!-- Hood -->
+  <path d="M11 8 Q16 4 21 8 Q16 6 11 8" fill="#696969"/>
+  <!-- Staff -->
+  <rect x="24" y="8" width="2" height="16" fill="#8B4513"/>
+  <circle cx="25" cy="8" r="2" fill="#FF69B4"/>
+</svg>

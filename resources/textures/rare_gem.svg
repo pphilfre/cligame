@@ -1,0 +1,10 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<svg xmlns="http://www.w3.org/2000/svg" width="32" height="32" viewBox="0 0 32 32">
+  <!-- Crystal/Gem -->
+  <polygon points="16,4 24,12 20,28 12,28 8,12" fill="#FF1493" stroke="#C71585" stroke-width="1"/>
+  <polygon points="16,4 20,10 16,16 12,10" fill="#FF69B4" opacity="0.8"/>
+  <polygon points="12,10 16,16 12,28 8,12" fill="#DC143C" opacity="0.6"/>
+  <polygon points="16,16 20,10 20,28 16,28" fill="#DC143C" opacity="0.6"/>
+  <circle cx="16" cy="12" r="1" fill="#FFFFFF" opacity="0.9"/>
+  <circle cx="14" cy="18" r="0.5" fill="#FFFFFF" opacity="0.7"/>
+</svg>

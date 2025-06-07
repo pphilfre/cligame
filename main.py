@@ -126,6 +126,36 @@ class QuestStatus(Enum):
     ACTIVE = 2
     COMPLETED = 3
 
+class NPCPersonality(Enum):
+    FRIENDLY = 1
+    GRUFF = 2
+    MYSTERIOUS = 3
+    GREEDY = 4
+    SCHOLARLY = 5
+    PARANOID = 6
+    CHEERFUL = 7
+    MELANCHOLIC = 8
+
+class NPCMood(Enum):
+    CONTENT = 1
+    EXCITED = 2
+    WORRIED = 3
+    ANGRY = 4
+    SAD = 5
+    CURIOUS = 6
+
+# Personality color mapping for visual representation
+PERSONALITY_COLORS = {
+    NPCPersonality.FRIENDLY: (100, 200, 100),     # Light green
+    NPCPersonality.GRUFF: (150, 100, 100),        # Brownish red
+    NPCPersonality.MYSTERIOUS: (120, 100, 180),   # Purple
+    NPCPersonality.GREEDY: (200, 200, 50),        # Gold
+    NPCPersonality.SCHOLARLY: (100, 150, 200),    # Light blue
+    NPCPersonality.PARANOID: (180, 180, 180),     # Gray
+    NPCPersonality.CHEERFUL: (255, 200, 100),     # Orange
+    NPCPersonality.MELANCHOLIC: (100, 100, 150),  # Dark blue
+}
+
 @dataclass
 class GameSettings:
     master_volume: float = DEFAULT_MASTER_VOLUME
@@ -302,6 +332,215 @@ class NPC:
     quest_giver: bool = False
     quest_id: Optional[str] = None
     shop_items: List[Item] = field(default_factory=list)  # For merchant NPCs
+    
+    # Enhanced personality system
+    personality: NPCPersonality = NPCPersonality.FRIENDLY
+    current_mood: NPCMood = NPCMood.CONTENT
+    interaction_count: int = 0  # How many times player has talked to this NPC
+    relationship_level: int = 0  # -100 to 100, affects dialogue and prices
+    last_interaction_time: int = 0  # Game ticks since last interaction
+    
+    # Dynamic dialogue system
+    dialogue_history: List[str] = field(default_factory=list)  # Track conversation history
+    contextual_responses: Dict[str, List[str]] = field(default_factory=dict)  # Context-based responses
+    
+    # NPC behavior
+    movement_pattern: str = "stationary"  # stationary, wander, patrol
+    patrol_points: List[Tuple[int, int]] = field(default_factory=list)
+    movement_timer: int = 0
+    home_position: Tuple[int, int] = (0, 0)  # Original spawn position
+    
+    # Trading and services
+    gold: int = 50  # NPC's money for trading
+    services: List[str] = field(default_factory=list)  # heal, repair, information, etc.
+    
+    def __post_init__(self):
+        """Initialize derived properties after creation"""
+        self.home_position = (self.rect.centerx, self.rect.centery)
+        # Set color based on personality
+        if self.personality in PERSONALITY_COLORS:
+            self.color = PERSONALITY_COLORS[self.personality]
+        # Generate contextual responses based on personality
+        self.generate_personality_responses()
+    
+    def generate_personality_responses(self):
+        """Generate personality-specific dialogue responses"""
+        base_greetings = {
+            NPCPersonality.FRIENDLY: [
+                "Hello there, friend! How can I help you today?",
+                "Welcome! It's always nice to see a new face around here.",
+                "Greetings, traveler! What brings you to these parts?"
+            ],
+            NPCPersonality.GRUFF: [
+                "What do you want?",
+                "I'm busy. Make it quick.",
+                "Hmph. Another wanderer, I suppose."
+            ],
+            NPCPersonality.MYSTERIOUS: [
+                "Ah... I wondered when you would arrive...",
+                "The winds whispered of your coming...",
+                "Fate has many paths, yours leads here..."
+            ],
+            NPCPersonality.GREEDY: [
+                "Got any gold to spend?",
+                "Business is business, what can I sell you?",
+                "Time is money, friend. What do you need?"
+            ],
+            NPCPersonality.SCHOLARLY: [
+                "Fascinating! A traveler with an inquiring look.",
+                "Knowledge is the greatest treasure. What would you learn?",
+                "I have studied many things. Perhaps I can enlighten you."
+            ],
+            NPCPersonality.PARANOID: [
+                "You're not one of THEM, are you?",
+                "Keep your voice down... walls have ears.",
+                "Can't be too careful these days..."
+            ],
+            NPCPersonality.CHEERFUL: [
+                "What a wonderful day to meet someone new!",
+                "Oh my, a visitor! How delightful!",
+                "Hello hello! Isn't life just grand?"
+            ],
+            NPCPersonality.MELANCHOLIC: [
+                "Oh... hello. I wasn't expecting company.",
+                "Another soul wandering these lonely paths...",
+                "The days grow long when you're alone..."
+            ]
+        }
+        
+        self.contextual_responses["greeting"] = base_greetings.get(
+            self.personality, base_greetings[NPCPersonality.FRIENDLY]
+        )
+        
+        # Add mood-modified responses
+        self.generate_mood_responses()
+    
+    def generate_mood_responses(self):
+        """Generate responses based on current mood"""
+        mood_modifiers = {
+            NPCMood.EXCITED: [
+                "I have wonderful news to share!",
+                "Oh, I'm so glad you're here!",
+                "Everything is going so well today!"
+            ],
+            NPCMood.WORRIED: [
+                "I'm quite concerned about recent events...",
+                "Something troubling has been happening...",
+                "I fear things may get worse before they get better."
+            ],
+            NPCMood.ANGRY: [
+                "I'm not in the mood for pleasantries.",
+                "Things have been going poorly lately.",
+                "Don't expect me to be cheerful right now."
+            ],
+            NPCMood.SAD: [
+                "I'm not feeling very talkative today...",
+                "Life has been difficult recently...",
+                "Perhaps we could speak another time."
+            ],
+            NPCMood.CURIOUS: [
+                "You seem interesting... tell me about yourself.",
+                "I'd love to hear about your adventures!",
+                "What fascinating stories you must have!"
+            ]
+        }
+        
+        if self.current_mood != NPCMood.CONTENT and self.current_mood in mood_modifiers:
+            self.contextual_responses["mood"] = mood_modifiers[self.current_mood]
+    
+    def get_dialogue_response(self, context: str = "greeting") -> str:
+        """Get an appropriate response based on context and relationship"""
+        # Adjust response based on relationship level
+        if self.relationship_level < -50:
+            negative_responses = [
+                "I don't think we have anything to discuss.",
+                "Perhaps you should find someone else to bother.",
+                "I'm not interested in talking to you."
+            ]
+            return random.choice(negative_responses)
+        elif self.relationship_level > 50:
+            positive_responses = [
+                "Always a pleasure to see you, my friend!",
+                "You're one of the good ones, you know that?",
+                "I'm glad our paths crossed!"
+            ]
+            return random.choice(positive_responses)
+        
+        # Use contextual responses
+        if context in self.contextual_responses:
+            available_responses = self.contextual_responses[context]
+        else:
+            available_responses = self.dialogue_options
+        
+        # Mix in mood responses occasionally
+        if "mood" in self.contextual_responses and random.random() < 0.3:
+            available_responses.extend(self.contextual_responses["mood"])
+        
+        if available_responses:
+            response = random.choice(available_responses)
+            # Avoid repeating the same response too often
+            if response not in self.dialogue_history[-3:]:  # Don't repeat last 3 responses
+                self.dialogue_history.append(response)
+                return response
+        
+        # Fallback to dialogue options
+        if self.dialogue_options:
+            return random.choice(self.dialogue_options)
+        
+        return "..."  # Silent fallback
+    
+    def modify_relationship(self, change: int):
+        """Modify relationship level with bounds checking"""
+        self.relationship_level = max(-100, min(100, self.relationship_level + change))
+        
+        # Update mood based on relationship changes
+        if change > 0:
+            if self.current_mood in [NPCMood.ANGRY, NPCMood.SAD]:
+                self.current_mood = NPCMood.CONTENT
+            elif random.random() < 0.3:
+                self.current_mood = NPCMood.EXCITED
+        elif change < -10:
+            if random.random() < 0.5:
+                self.current_mood = NPCMood.ANGRY
+    
+    def update_behavior(self, game_ticks: int):
+        """Update NPC behavior like movement and mood changes"""
+        # Mood changes over time
+        if game_ticks - self.last_interaction_time > 1000:  # About 16 seconds at 60 FPS
+            if random.random() < 0.1:  # 10% chance to change mood
+                self.current_mood = random.choice(list(NPCMood))
+                self.generate_mood_responses()
+        
+        # Movement behavior
+        if self.movement_pattern == "wander" and self.movement_timer <= 0:
+            # Wander randomly but stay near home
+            home_x, home_y = self.home_position
+            max_distance = 100  # pixels
+            
+            new_x = home_x + random.randint(-max_distance, max_distance)
+            new_y = home_y + random.randint(-max_distance, max_distance)
+            
+            # Constrain to screen bounds
+            new_x = max(TILE_SIZE, min(SCREEN_WIDTH - TILE_SIZE, new_x))
+            new_y = max(TILE_SIZE, min(SCREEN_HEIGHT - TILE_SIZE, new_y))
+            
+            self.rect.centerx = new_x
+            self.rect.centery = new_y
+            self.movement_timer = random.randint(180, 600)  # 3-10 seconds
+        elif self.movement_pattern == "patrol" and self.patrol_points and self.movement_timer <= 0:
+            # Move between patrol points
+            if not hasattr(self, 'patrol_index'):
+                self.patrol_index = 0
+            
+            target_x, target_y = self.patrol_points[self.patrol_index]
+            self.rect.centerx = target_x
+            self.rect.centery = target_y
+            
+            self.patrol_index = (self.patrol_index + 1) % len(self.patrol_points)
+            self.movement_timer = random.randint(240, 480)  # 4-8 seconds
+        
+        if self.movement_timer > 0:
+            self.movement_timer -= 1
 
     def to_dict(self):
         return {
@@ -311,22 +550,84 @@ class NPC:
             'color': self.color,
             'quest_giver': self.quest_giver,
             'quest_id': self.quest_id,
-            'shop_items': [item.to_dict() for item in self.shop_items]
+            'shop_items': [item.to_dict() for item in self.shop_items],
+            # Enhanced personality system fields
+            'personality': self.personality.value if isinstance(self.personality, NPCPersonality) else self.personality,
+            'current_mood': self.current_mood.value if isinstance(self.current_mood, NPCMood) else self.current_mood,
+            'interaction_count': self.interaction_count,
+            'relationship_level': self.relationship_level,
+            'last_interaction_time': self.last_interaction_time,
+            'dialogue_history': self.dialogue_history,
+            'contextual_responses': self.contextual_responses,
+            'movement_pattern': self.movement_pattern,
+            'patrol_points': self.patrol_points,
+            'movement_timer': self.movement_timer,
+            'home_position': self.home_position,
+            'gold': self.gold,
+            'services': self.services
         }
     
     @classmethod
     def from_dict(cls, data):
         rect_data = data['rect']
         rect = pygame.Rect(rect_data['x'], rect_data['y'], rect_data['width'], rect_data['height'])
+        
+        # Handle personality - could be string or enum value
+        personality_data = data.get('personality', NPCPersonality.FRIENDLY)
+        if isinstance(personality_data, str):
+            try:
+                personality = NPCPersonality[personality_data]
+            except KeyError:
+                personality = NPCPersonality.FRIENDLY
+        elif isinstance(personality_data, int):
+            try:
+                personality = NPCPersonality(personality_data)
+            except ValueError:
+                personality = NPCPersonality.FRIENDLY
+        else:
+            personality = personality_data if personality_data else NPCPersonality.FRIENDLY
+        
+        # Handle mood - could be string or enum value
+        mood_data = data.get('current_mood', data.get('mood', NPCMood.CONTENT))
+        if isinstance(mood_data, str):
+            try:
+                current_mood = NPCMood[mood_data]
+            except KeyError:
+                current_mood = NPCMood.CONTENT
+        elif isinstance(mood_data, int):
+            try:
+                current_mood = NPCMood(mood_data)
+            except ValueError:
+                current_mood = NPCMood.CONTENT
+        else:
+            current_mood = mood_data if mood_data else NPCMood.CONTENT
+        
         npc = cls(
             name=data['name'],
             rect=rect,
             dialogue_options=data.get('dialogue_options', []),
             color=tuple(data.get('color', NPC_COLOR)),
             quest_giver=data.get('quest_giver', False),
-            quest_id=data.get('quest_id')
+            quest_id=data.get('quest_id'),
+            shop_items=[],  # Will be populated below
+            personality=personality,
+            current_mood=current_mood,
+            interaction_count=data.get('interaction_count', 0),
+            relationship_level=data.get('relationship_level', 0),
+            last_interaction_time=data.get('last_interaction_time', 0),
+            dialogue_history=data.get('dialogue_history', []),
+            contextual_responses=data.get('contextual_responses', {}),
+            movement_pattern=data.get('movement_pattern', 'stationary'),
+            patrol_points=data.get('patrol_points', []),
+            movement_timer=data.get('movement_timer', 0),
+            home_position=tuple(data.get('home_position', (0, 0))),
+            gold=data.get('gold', 50),
+            services=data.get('services', [])
         )
+        
+        # Populate shop items
         npc.shop_items = [Item.from_dict(item_data) for item_data in data.get('shop_items', [])]
+        
         return npc
 
 
@@ -1176,7 +1477,7 @@ class Room:
                     if (room_x < nx < room_x + room_w - 1 and
                         room_y < ny < room_y + room_h - 1 and
                         self.grid[ny][nx] == TileType.FLOOR and
-                        random.random() < 0.8):  # 80% chance per segment (gaps in fence)
+                        random.random() < 0.8):  #  80% chance per segment (gaps in fence)
                         self.grid[ny][nx] = TileType.WALL
 
     def generate_generic_features(self):
@@ -1722,7 +2023,12 @@ class Game:
         npc_data = random.choice(available_npcs)
         name, dialogue = npc_data
         
-        npc = NPC(name, pygame.Rect(0, 0, TILE_SIZE, TILE_SIZE), dialogue)
+        # Randomly assign personality and mood
+        personality = random.choice(list(NPCPersonality))
+        mood = random.choice(list(NPCMood))
+        
+        npc = NPC(name, pygame.Rect(0, 0, TILE_SIZE, TILE_SIZE), dialogue, 
+                  personality=personality, current_mood=mood)
         room.add_npc(npc)
     
     def discover_new_room(self, from_room: str, direction: str) -> str:
@@ -1871,1241 +2177,694 @@ class Game:
                         room.grid[check_y][check_x] != TileType.EXIT):
                         room.grid[check_y][check_x] = TileType.FLOOR
 
-    def create_story_quests(self):
-        """Create the main storyline quests and side quests"""
-        # Main storyline quests
-        self.quests["main_01"] = Quest(
-            id="main_01",
-            title="The Ancient Map",
-            description="Find the Cave Hermit and learn about the ancient mysteries.",
-            objectives=["Talk to the Cave Hermit", "Find the Old Map"],
-            completed_objectives=[False, False],
-            reward_items=["Mystic Compass"],
-            reward_text="You've begun your journey into the ancient mysteries!"
-        )
+    def transition_to_adjacent_room(self, direction: str):
+        """Handle natural room transitions when player walks off screen edge"""
+        if not self.player:
+            return
+            
+        current_room_obj = self.rooms[self.player.current_room]
         
-        self.quests["main_02"] = Quest(
-            id="main_02",
-            title="The Crystal Power",
-            description="Explore the Crystal Chamber and harness its power.",
-            objectives=["Enter the Crystal Chamber", "Collect the Glowing Crystal"],
-            completed_objectives=[False, False],
-            reward_items=["Crystal Amulet"],
-            reward_text="The crystal's energy flows through you!"
-        )
+        # Check if there's already an exit in this direction
+        if direction in current_room_obj.exits:
+            target_room, entry_x, entry_y = current_room_obj.exits[direction]
+            # If target room doesn't exist, generate it
+            if target_room not in self.rooms:
+                target_room = self.discover_new_room(self.player.current_room, direction)
+                entry_x, entry_y = self.get_entry_position(direction)
+        else:
+            # Generate a new room in this direction
+            target_room = self.discover_new_room(self.player.current_room, direction)
+            entry_x, entry_y = self.get_entry_position(direction)
+            
+        # Move player to new room at opposite edge
+        self.player.current_room = target_room
+        self.player.rect.centerx = entry_x * TILE_SIZE + TILE_SIZE // 2
+        self.player.rect.centery = entry_y * TILE_SIZE + TILE_SIZE // 2
         
-        self.quests["main_03"] = Quest(
-            id="main_03",
-            title="The Lost City",
-            description="Find the legendary lost city of Aethermoor.",
-            objectives=["Navigate through the Underground Tunnels", "Discover the Lost City"],
-            completed_objectives=[False, False],
-            reward_items=["Ancient Medallion"],
-            reward_text="You've made a discovery of historical significance!"
-        )
-        
-        # Side quests
-        self.quests["side_01"] = Quest(
-            id="side_01",
-            title="The Gem Collector",
-            description="Collect rare gems for the Mysterious Collector.",
-            objectives=["Find 3 Rare Gems"],
-            completed_objectives=[False],
-            reward_items=["Gem Pouch", "Gold Coins"],
-            reward_text="The collector is pleased with your finds!"
-        )
-        
-        self.quests["side_02"] = Quest(
-            id="side_02",
-            title="Bandit Trouble",
-            description="Help the merchants deal with bandits stealing their goods.",
-            objectives=["Find the Bandit Camp", "Recover the Stolen Goods"],
-            completed_objectives=[False, False],
-            reward_items=["Merchant's Gratitude", "Trading License"],
-            reward_text="The merchants thank you for your help!"
-        )
-
-    def get_next_room_name(self) -> str:
-        """Generate the name for the next room based on existing rooms"""
-        base_name = "Room"
-        counter = 1
-        while True:
-            new_name = f"{base_name} {counter}"
-            if new_name not in self.rooms:
-                return new_name
-            counter += 1
-
-    def update_room_visits(self, room_name: str):
-        """Update room visit status and difficulty based on player progress"""
-        if room_name in self.rooms:
-            room = self.rooms[room_name]
-            room.visited = True
-            
-            # Increase difficulty slightly for revisited rooms
-            room.difficulty_level = min(10, room.difficulty_level + 1)
-            
-    def start_quest(self, quest_id: str):
-        """Start a new quest"""
-        if quest_id in self.quests:
-            quest = self.quests[quest_id]
-            if quest.status == QuestStatus.NOT_STARTED:
-                quest.status = QuestStatus.ACTIVE
-                self.player.active_quests.append(quest_id)
-                self.show_notification(f"New Quest: {quest.title}", 3)
-            return True
-        return False
-
-    def complete_quest(self, quest: Quest):
-        """Complete a quest and give rewards"""
-        if quest.status == QuestStatus.ACTIVE:
-            quest.status = QuestStatus.COMPLETED
-            
-            # Add reward items to inventory
-            for item_name in quest.reward_items:
-                new_item = Item(item_name, f"Quest reward from {quest.title}", ItemType.KEY_ITEM)
-                self.player.inventory.append(new_item)
-            
-            # Other rewards could be added here (gold, exp, etc.)
-            self.player.gold += 50  # Basic gold reward
-            self.player.experience += 100  # Basic exp reward
-            
-            # Show completion message
-            self.show_notification(quest.reward_text, 4)
-            return True
-        return False
+        self.show_notification(f"Entered {target_room}", 2)
+        self.check_quest_objectives("enter_room", target_room)
     
-    def check_quest_objectives(self, action_type: str, target: str):
-        """Check if an action completes any quest objectives"""
+    def check_quest_objectives(self, action_type: str, action_target: str):
+        """Check if any quest objectives are completed by this action"""
         if not self.player:
             return
             
         for quest_id in self.player.active_quests:
-            if quest_id not in self.quests:
-                continue
-                
-            quest = self.quests[quest_id]
-            if quest.status != QuestStatus.ACTIVE:
-                continue
-                
-            # Check objectives based on action type
-            if action_type == "talk_npc":
-                for i, objective in enumerate(quest.objectives):
-                    if not quest.completed_objectives[i] and f"Talk to {target}" in objective:
-                        quest.completed_objectives[i] = True
-                        self.show_notification(f"Objective completed: {objective}", 3)
-                        
-            elif action_type == "enter_room":
-                for i, objective in enumerate(quest.objectives):
-                    if not quest.completed_objectives[i] and (
-                        f"Enter {target}" in objective or 
-                        f"Find {target}" in objective or
-                        f"Discover {target}" in objective
-                    ):
-                        quest.completed_objectives[i] = True
-                        self.show_notification(f"Objective completed: {objective}", 3)
-                        
-            elif action_type == "pickup_item":
-                for i, objective in enumerate(quest.objectives):
-                    if not quest.completed_objectives[i] and (
-                        f"Find {target}" in objective or
-                        f"Collect {target}" in objective or
-                        f"Obtain {target}" in objective
-                    ):
-                        quest.completed_objectives[i] = True
-                        self.show_notification(f"Objective completed: {objective}", 3)
+            if quest_id in self.quests:
+                quest = self.quests[quest_id]
+                if quest.status == QuestStatus.ACTIVE:
+                    # Check each objective
+                    for i, objective in enumerate(quest.objectives):
+                        if not quest.completed_objectives[i]:
+                            # Simple pattern matching for objectives
+                            if action_type == "enter_room" and action_target.lower() in objective.lower():
+                                quest.completed_objectives[i] = True
+                                self.show_notification(f"Quest objective completed: {objective}", 3)
+                            elif action_type == "collect_item" and action_target.lower() in objective.lower():
+                                quest.completed_objectives[i] = True
+                                self.show_notification(f"Quest objective completed: {objective}", 3)
+                            elif action_type == "talk_to_npc" and action_target.lower() in objective.lower():
+                                quest.completed_objectives[i] = True
+                                self.show_notification(f"Quest objective completed: {objective}", 3)
+                    
+                    # Check if quest is complete
+                    if all(quest.completed_objectives):
+                        quest.status = QuestStatus.COMPLETED
+                        self.show_notification(f"Quest completed: {quest.title}", 4)
+                        # Give rewards
+                        for reward_item in quest.reward_items:
+                            self.player.inventory.append(Item(reward_item, f"Reward from {quest.title}", ItemType.TREASURE))
+    
+    def create_story_quests(self):
+        """Create the main story quests"""
+        main_quest = Quest(
+            id="main_01",
+            title="Ancient Mysteries",
+            description="Explore the mystical caves and uncover their secrets.",
+            objectives=[
+                "Talk to the Cave Hermit",
+                "Find the Crystal Chamber",
+                "Collect the Glowing Crystal",
+                "Reach the Lost City of Aethermoor"
+            ],
+            completed_objectives=[False, False, False, False],
+            reward_items=["Ancient Tome", "Crystal Staff"],
+            reward_text="You have uncovered the first mysteries of the ancient realm!"
+        )
+        
+        side_quest = Quest(
+            id="side_01", 
+            title="Collector's Commission",
+            description="The Mysterious Collector seeks rare treasures.",
+            objectives=[
+                "Talk to the Mysterious Collector",
+                "Find valuable gems or artifacts",
+                "Return to the collector"
+            ],
+            completed_objectives=[False, False, False],
+            reward_items=["Collector's Reward", "Gold"],
+            reward_text="The collector is pleased with your findings!"
+        )
+        
+        self.quests = {
+            "main_01": main_quest,
+            "side_01": side_quest
+        }
+    
+    def save_game(self, slot: int = 0):
+        """Save the current game state"""
+        if not self.player:
+            self.show_notification("No game to save!", 2)
+            return
             
-            # Check if all objectives are completed
-            if all(quest.completed_objectives):
-                self.show_notification(f"Quest complete: {quest.title}! Return to quest giver for reward.", 4)
+        save_data = {
+            'player': self.player.to_dict(),
+            'rooms': {name: room.to_dict() for name, room in self.rooms.items()},
+            'quests': {quest_id: quest.to_dict() for quest_id, quest in self.quests.items()},
+            'room_id_counter': self.room_id_counter,
+            'discovered_exits': self.discovered_exits
+        }
+        
+        try:
+            filename = f"savegame_slot_{slot}.json" if slot > 0 else SAVE_FILE
+            with open(filename, 'w') as f:
+                json.dump(save_data, f, indent=2)
+            self.show_notification(f"Game saved to slot {slot}!", 3)
+        except Exception as e:
+            print(f"Failed to save game: {e}")
+            self.show_notification(f"Save failed: {e}", 3)
+    
+    def load_game(self, slot: int = 0):
+        """Load a saved game state"""
+        try:
+            filename = f"savegame_slot_{slot}.json" if slot > 0 else SAVE_FILE
+            if not os.path.exists(filename):
+                self.show_notification(f"No save file found in slot {slot}!", 2)
+                return False
                 
-    def use_item(self, item_name: str):
-        """Use an item from the player's inventory"""
+            with open(filename, 'r') as f:
+                save_data = json.load(f)
+            
+            # Load player
+            self.player = Player.from_dict(save_data['player'])
+            
+            # Load rooms
+            self.rooms = {}
+            for room_name, room_data in save_data['rooms'].items():
+                self.rooms[room_name] = Room.from_dict(room_data, room_name)
+            
+            # Load quests
+            self.quests = {}
+            for quest_id, quest_data in save_data['quests'].items():
+                self.quests[quest_id] = Quest.from_dict(quest_data)
+            
+            # Load other data
+            self.room_id_counter = save_data.get('room_id_counter', 1000)
+            self.discovered_exits = save_data.get('discovered_exits', {})
+            
+            self.state = GameState.PLAYING
+            self.show_notification(f"Game loaded from slot {slot}!", 3)
+            return True
+            
+        except Exception as e:
+            print(f"Failed to load game: {e}")
+            self.show_notification(f"Load failed: {e}", 3)
+            return False
+    
+    def get_entry_position(self, direction: str) -> Tuple[int, int]:
+        """Get the entry position when entering a room from a specific direction"""
+        if direction == "north":
+            return (GRID_WIDTH // 2, GRID_HEIGHT - 2)  # Enter from bottom
+        elif direction == "south":
+            return (GRID_WIDTH // 2, 1)  # Enter from top
+        elif direction == "west":
+            return (GRID_WIDTH - 2, GRID_HEIGHT // 2)  # Enter from right
+        elif direction == "east":
+            return (1, GRID_HEIGHT // 2)  # Enter from left
+        else:
+            return (GRID_WIDTH // 2, GRID_HEIGHT // 2)  # Default to center
+
+    def get_item_texture_name(self, item_name: str) -> str:
+        """Map item names to texture file names"""
+        texture_map = {
+            "Health Potion": "health_potion",
+            "Gold Coin": "gold_coins", 
+            "Gold Coins": "gold_coins",
+            "Rare Gem": "rare_gem",
+            "Old Map": "old_map",
+            "Ancient Scroll": "old_map",
+            "Scroll Fragment": "old_map",
+            "Village Map": "old_map",
+            "Merchant's Ledger": "old_map",
+            "Rusty Key": "rusty_key",
+            "City Key": "rusty_key",
+            "Glowing Crystal": "glowing_crystal",
+            "Crystal Shard": "glowing_crystal",
+            "Jeweled Dagger": "jeweled_dagger",
+            "Stone Tablet": "old_map",
+            "Trade Goods": "gold_coins",
+            "Bandit Treasure": "gold_coins"
+        }
+        return texture_map.get(item_name, "gold_coins")  # Default to gold coins
+
+    def get_npc_texture_name(self, npc_name: str) -> str:
+        """Map NPC names to texture file names"""
+        texture_map = {
+            "Cave Hermit": "cave_hermit",
+            "Cave Dweller": "cave_hermit",
+            "Lost Explorer": "cave_hermit",
+            "Crystal Miner": "cave_hermit",
+            "Forest Guardian": "forest_guardian",
+            "Wandering Druid": "forest_guardian",
+            "Lost Traveler": "forest_guardian",
+            "Village Elder": "village_elder",
+            "Local Merchant": "merchant",
+            "Village Guard": "village_elder",
+            "Mysterious Collector": "merchant",
+            "Archaeologist": "village_elder",
+            "Relic Hunter": "merchant",
+            "Ghost of the Past": "cave_hermit"
+        }
+        return texture_map.get(npc_name, "village_elder")  # Default to village elder
+
+    def check_wall_collision(self, rect: pygame.Rect) -> bool:
+        """Check for wall collisions and handle edge transitions"""
         if not self.player:
             return False
             
-        item = self.player.get_item(item_name)
-        if not item:
-            self.show_notification(f"You don't have a {item_name}.", 2)
-            return False
-            
-        # Handle different item types
-        if item_name == "Health Potion":
-            # Heal the player
-            if self.player.health >= self.player.max_health:
-                self.show_notification("You are already at full health.", 2)
-                return False
-                
-            heal_amount = 50  # Standard health potion healing
-            self.player.health = min(self.player.max_health, self.player.health + heal_amount)
-            self.player.remove_item(item_name, 1)
-            self.show_notification(f"Used {item_name}. +{heal_amount} HP!", 2)
-            return True
-            
-        # Add more item types as needed
-        
-        return False
-
-    def load_game(self):
-        if not os.path.exists(SAVE_FILE):
-            self.show_notification("No save file found.", 2)
-            return False
-        try:
-            with open(SAVE_FILE, 'r') as f:
-                save_data = json.load(f)
-            
-            self.player = Player.from_dict(save_data['player'])
-            
-            self.rooms = {}
-            for room_name, room_data in save_data['rooms'].items():
-                self.rooms[room_name] = Room.from_dict(room_data, name_override=room_name)
-            
-            # Load quest data if available
-            if 'quests' in save_data:
-                self.quests = {}
-                for quest_id, quest_data in save_data['quests'].items():
-                    self.quests[quest_id] = Quest.from_dict(quest_data)
-            else:
-                # Fallback to default quests if save doesn't have quest data
-                self.create_story_quests()
-            
-            # Load procedural generation data
-            self.room_id_counter = save_data.get('room_id_counter', 1000)
-            
-            # Deserialize discovered exits
-            self.discovered_exits = {}
-            if 'discovered_exits' in save_data:
-                for key_str, value in save_data['discovered_exits'].items():
-                    room_name, direction = key_str.split('_', 1)
-                    self.discovered_exits[(room_name, direction)] = tuple(value)
-            
-            # Load settings if available
-            if 'settings' in save_data:
-                self.settings = GameSettings.from_dict(save_data['settings'])
-                self.apply_settings()
-            
-            self.state = GameState.PLAYING
-            self.show_notification("Game Loaded!", 2)
-            return True
-        except Exception as e:
-            print(f"Failed to load game: {e}")
-            self.show_notification(f"Load Failed: {e}", 3)
-            # Reset to a safe state
-            self.player = None
-            self.state = GameState.NAME_INPUT
-            self.create_initial_rooms()
-            self.create_story_quests()
-            return False
-
-    def show_notification(self, text: str, duration_seconds: int):
-        self.notification_text = text
-        self.notification_timer = FPS * duration_seconds
-
-    def handle_name_input(self, event):
-        if event.type == pygame.KEYDOWN:
-            if event.key == pygame.K_RETURN and self.input_text.strip():
-                start_pos_x = SCREEN_WIDTH // 2
-                start_pos_y = SCREEN_HEIGHT // 2
-                # Try to place player on a floor tile in the starting room
-                start_room_obj = self.rooms.get("Mystic Cave Entrance")
-                if start_room_obj:
-                    placed = False
-                    for r in range(start_room_obj.grid_height):
-                        for c in range(start_room_obj.grid_width):
-                            if start_room_obj.grid[r][c] == TileType.FLOOR:
-                                start_pos_x = c * TILE_SIZE + TILE_SIZE // 2
-                                start_pos_y = r * TILE_SIZE + TILE_SIZE // 2
-                                placed = True
-                                break
-                        if placed: break
-                
-                self.player = Player(
-                    name=self.input_text.strip(),
-                    rect=pygame.Rect(start_pos_x - TILE_SIZE//4, start_pos_y - TILE_SIZE//4, TILE_SIZE//2, TILE_SIZE//2),
-                    current_room="Mystic Cave Entrance"
-                )
-                
-                # Start the first quest automatically
-                self.start_quest("main_01")
-                
-                self.state = GameState.PLAYING
-                self.show_notification(f"Welcome, {self.player.name}! Your adventure begins...", 3)
-            elif event.key == pygame.K_BACKSPACE:
-                self.input_text = self.input_text[:-1]
-            elif len(self.input_text) < 20: # Max name length
-                self.input_text += event.unicode
-    
-    def handle_playing_input(self, event):
-        if not self.player: return
-
-        if event.type == pygame.KEYDOWN:
-            if event.key == pygame.K_i:
-                self.state = GameState.INVENTORY
-            elif event.key == pygame.K_q:
-                self.state = GameState.QUEST_LOG
-            elif event.key == pygame.K_e: # Interact key
-                self.try_interaction()
-            elif event.key == pygame.K_h: # Use health potion
-                self.use_item("Health Potion")
-            elif event.key == pygame.K_TAB:  # Settings menu - Fixed to ensure it opens settings, not quest menu
-                self.state = GameState.SETTINGS
-                self.settings_selection = 0
-            elif event.key == pygame.K_ESCAPE:
-                 # Simple pause/main menu functionality can be added here
-                self.show_notification("Controls: WASD=Move, E=Interact, I=Inventory, Q=Quests, H=Health Potion, TAB=Settings", 4)
-            elif event.key == pygame.K_F5: # Quick Save
-                self.save_game()
-            elif event.key == pygame.K_F9: # Quick Load
-                self.load_game()
-    
-    def handle_settings_input(self, event):
-        if event.type == pygame.KEYDOWN:
-            if event.key == pygame.K_UP:
-                self.settings_selection = (self.settings_selection - 1) % len(self.settings_options)
-            elif event.key == pygame.K_DOWN:
-                self.settings_selection = (self.settings_selection + 1) % len(self.settings_options)
-            elif event.key == pygame.K_LEFT:
-                self.adjust_setting(-1)
-            elif event.key == pygame.K_RIGHT:
-                self.adjust_setting(1)
-            elif event.key == pygame.K_RETURN or event.key == pygame.K_e:
-                if self.settings_options[self.settings_selection] == "Back":
-                    self.apply_settings()
-                    self.save_settings()
-                    self.state = GameState.PLAYING
-                elif self.settings_options[self.settings_selection] == "Fullscreen":
-                    self.settings.fullscreen = not self.settings.fullscreen
-                    self.apply_settings()
-            elif event.key == pygame.K_ESCAPE or event.key == pygame.K_TAB:
-                self.apply_settings()
-                self.save_settings()
-                self.state = GameState.PLAYING
-    
-    def adjust_setting(self, direction: int):
-        """Adjust the currently selected setting"""
-        setting_name = self.settings_options[self.settings_selection]
-        
-        if setting_name == "Master Volume":
-            self.settings.master_volume = max(0.0, min(1.0, self.settings.master_volume + direction * 0.1))
-        elif setting_name == "SFX Volume":
-            self.settings.sfx_volume = max(0.0, min(1.0, self.settings.sfx_volume + direction * 0.1))
-        elif setting_name == "Music Volume":
-            self.settings.music_volume = max(0.0, min(1.0, self.settings.music_volume + direction * 0.1))
-        elif setting_name == "Screen Scale":
-            self.settings.screen_scale = max(0.5, min(2.0, self.settings.screen_scale + direction * 0.1))
-
-
-    def try_interaction(self):
-        if not self.player: return
-        current_room_obj = self.rooms[self.player.current_room]
-        interaction_rect = self.player.rect.inflate(TILE_SIZE // 2, TILE_SIZE // 2) # Slightly larger interaction radius
-
-        # Check for NPC interaction
-        for npc in current_room_obj.npcs:
-            if interaction_rect.colliderect(npc.rect):
-                self.dialogue_target_npc = npc
-                
-                # Check for quest interactions
-                if npc.quest_giver and npc.quest_id:
-                    quest = self.quests.get(npc.quest_id)
-                    if quest:
-                        if quest.status == QuestStatus.NOT_STARTED:
-                            # Offer quest
-                            self.dialogue_text = f"I have a task for you: {quest.description}"
-                            self.dialogue_choices = ["Accept Quest", "Ask more", "Decline"]
-                        elif quest.status == QuestStatus.ACTIVE:
-                            # Check quest progress
-                            if all(quest.completed_objectives):
-                                self.dialogue_text = "Excellent work! You've completed the task."
-                                self.dialogue_choices = ["Claim Reward", "Ask more", "Goodbye"]
-                            else:
-                                completed = sum(quest.completed_objectives)
-                                total = len(quest.objectives)
-                                self.dialogue_text = f"Progress: {completed}/{total} objectives completed."
-                                self.dialogue_choices = ["Check Objectives", "Ask more", "Goodbye"]
-                        elif quest.status == QuestStatus.COMPLETED:
-                            self.dialogue_text = "Thank you for your help with that task!"
-                            self.dialogue_choices = ["Ask more", "Goodbye"]
-                        else:
-                            self.dialogue_text = random.choice(npc.dialogue_options)
-                            self.dialogue_choices = ["Ask more", "Goodbye"]
-                    else:
-                        self.dialogue_text = random.choice(npc.dialogue_options)
-                        self.dialogue_choices = ["Ask more", "Goodbye"]
-                else:
-                    self.dialogue_text = random.choice(npc.dialogue_options)
-                    self.dialogue_choices = ["Ask more", "Goodbye"]
-                
-                self.selected_choice_idx = 0
-                self.state = GameState.DIALOGUE
-                
-                # Track talking to NPCs for quest objectives
-                self.check_quest_objectives("talk_npc", npc.name)
-                return
-
-        # Check for item pickup
-        for item in current_room_obj.items[:]: # Iterate copy for safe removal
-            item_rect = pygame.Rect(item.x * TILE_SIZE, item.y * TILE_SIZE, TILE_SIZE, TILE_SIZE)
-            if interaction_rect.colliderect(item_rect):
-                self.player.inventory.append(item)
-                current_room_obj.items.remove(item)
-                self.show_notification(f"Picked up {item.name}", 2)
-                
-                # Track item pickup for quest objectives
-                self.check_quest_objectives("pickup_item", item.name)
-                return
-        
-        # Check for chest interactions
-        player_tile_x = self.player.rect.centerx // TILE_SIZE
-        player_tile_y = self.player.rect.centery // TILE_SIZE
-        
-        for dy in range(-1, 2):
-            for dx in range(-1, 2):
-                check_x, check_y = player_tile_x + dx, player_tile_y + dy
-                if (0 <= check_x < current_room_obj.grid_width and 
-                    0 <= check_y < current_room_obj.grid_height):
-                    if current_room_obj.grid[check_y][check_x] == TileType.CHEST:
-                        # Open chest
-                        current_room_obj.grid[check_y][check_x] = TileType.FLOOR
-                        treasure_items = [
-                            Item("Gold Coins", "Shiny gold coins", ItemType.TREASURE, quantity=random.randint(20, 50), value=1),
-                            Item("Rare Gem", "A valuable crystal", ItemType.TREASURE, quantity=1, value=100),
-                            Item("Health Potion", "Restores HP", ItemType.CONSUMABLE, quantity=random.randint(1, 3))
-                        ]
-                        found_item = random.choice(treasure_items)
-                        self.player.inventory.append(found_item)
-                        self.show_notification(f"Found {found_item.name} in chest!", 3)
-                        return
-        
-        # Check for room transitions
-        self.check_room_transitions()
-
-    def check_room_transitions(self):
-        """Check if player is on an exit tile and handle room transitions"""
-        current_room_obj = self.rooms[self.player.current_room]
-        player_tile_x = self.player.rect.centerx // TILE_SIZE
-        player_tile_y = self.player.rect.centery // TILE_SIZE
-        
-        # Check if current tile is an exit
-        if (0 <= player_tile_x < current_room_obj.grid_width and 
-            0 <= player_tile_y < current_room_obj.grid_height):
-            if current_room_obj.grid[player_tile_y][player_tile_x] == TileType.EXIT:
-                # Find which exit this is
-                for direction, (target_room, entry_x, entry_y) in current_room_obj.exits.items():
-                    # Check if player is on the correct exit tile for this direction
-                    if self.is_player_on_exit_tile(current_room_obj, player_tile_x, player_tile_y, direction):
-                        # If target room doesn't exist, it might be a procedural exit
-                        if target_room not in self.rooms:
-                            target_room = self.discover_new_room(self.player.current_room, direction)
-                        
-                        self.player.current_room = target_room
-                        self.player.rect.centerx = entry_x * TILE_SIZE + TILE_SIZE // 2
-                        self.player.rect.centery = entry_y * TILE_SIZE + TILE_SIZE // 2
-                        self.show_notification(f"Entered {target_room}", 2)
-                        
-                        # Track room entry for quest objectives
-                        self.check_quest_objectives("enter_room", target_room)
-                        return
-                
-                # If no existing exit found, generate a new room in the direction player is moving
-                direction = self.get_direction_from_exit_position(current_room_obj, player_tile_x, player_tile_y)
-                if direction and direction not in current_room_obj.exits:
-                    target_room = self.discover_new_room(self.player.current_room, direction)
-                    # Get the entry position for the new room
-                    _, entry_x, entry_y = current_room_obj.exits[direction]
-                    self.player.current_room = target_room
-                    self.player.rect.centerx = entry_x * TILE_SIZE + TILE_SIZE // 2
-                    self.player.rect.centery = entry_y * TILE_SIZE + TILE_SIZE // 2
-                    self.show_notification(f"Discovered {target_room}!", 3)
-                    self.check_quest_objectives("enter_room", target_room)
-    
-    def get_direction_from_exit_position(self, room: Room, tile_x: int, tile_y: int) -> Optional[str]:
-        """Determine direction based on exit tile position"""
-        if tile_y == 0:
-            return "north"
-        elif tile_y == room.grid_height - 1:
-            return "south"
-        elif tile_x == 0:
-            return "west"
-        elif tile_x == room.grid_width - 1:
-            return "east"
-        return None
-
-
-    def is_player_on_exit_tile(self, room: Room, player_tile_x: int, player_tile_y: int, direction: str) -> bool:
-        """Checks if the player is on a tile that is an exit for the given direction."""
-        if direction in room.exits:
-            target_room, entry_x, entry_y = room.exits[direction]
-            
-            # Check if player is on the specific exit tile for this direction
-            # The exit tiles are placed at specific coordinates based on direction
-            if direction == "north":
-                return player_tile_y == 0 and abs(player_tile_x - (GRID_WIDTH // 2)) <= 1
-            elif direction == "south":
-                return player_tile_y == room.grid_height - 1 and abs(player_tile_x - (GRID_WIDTH // 2)) <= 1
-            elif direction == "west":
-                return player_tile_x == 0 and abs(player_tile_y - (GRID_HEIGHT // 2)) <= 1
-            elif direction == "east":
-                return player_tile_x == room.grid_width - 1 and abs(player_tile_y - (GRID_HEIGHT // 2)) <= 1
-        return False
-
-
-    def handle_dialogue_input(self, event):
-        if event.type == pygame.KEYDOWN:
-            if event.key == pygame.K_UP:
-                self.selected_choice_idx = (self.selected_choice_idx - 1) % len(self.dialogue_choices)
-            elif event.key == pygame.K_DOWN:
-                self.selected_choice_idx = (self.selected_choice_idx + 1) % len(self.dialogue_choices)
-            elif event.key == pygame.K_RETURN or event.key == pygame.K_e:
-                chosen_option = self.dialogue_choices[self.selected_choice_idx]
-                
-                if chosen_option == "Goodbye" or chosen_option == "Goodbye.":
-                    self.state = GameState.PLAYING
-                    self.dialogue_target_npc = None
-                elif chosen_option == "Accept Quest":
-                    # Start the quest
-                    if self.dialogue_target_npc and self.dialogue_target_npc.quest_id:
-                        self.start_quest(self.dialogue_target_npc.quest_id)
-                        self.dialogue_text = "Excellent! I knew I could count on you."
-                        self.dialogue_choices = ["Check Objectives", "Goodbye"]
-                elif chosen_option == "Claim Reward":
-                    # Complete the quest
-                    if self.dialogue_target_npc and self.dialogue_target_npc.quest_id:
-                        quest = self.quests.get(self.dialogue_target_npc.quest_id)
-                        if quest and quest.status == QuestStatus.ACTIVE:
-                            self.complete_quest(quest)
-                            self.dialogue_text = "Here is your reward! Well earned."
-                            self.dialogue_choices = ["Thank you", "Goodbye"]
-                elif chosen_option == "Check Objectives":
-                    # Show quest objectives
-                    if self.dialogue_target_npc and self.dialogue_target_npc.quest_id:
-                        quest = self.quests.get(self.dialogue_target_npc.quest_id)
-                        if quest:
-                            obj_text = "Your tasks:\n"
-                            for i, obj in enumerate(quest.objectives):
-                                status = "✓" if quest.completed_objectives[i] else "○"
-                                obj_text += f"{status} {obj}\n"
-                            self.dialogue_text = obj_text.strip()
-                            self.dialogue_choices = ["Continue Quest", "Goodbye"]
-                elif chosen_option == "Decline":
-                    self.dialogue_text = "Perhaps another time then."
-                    self.dialogue_choices = ["Ask more", "Goodbye"]
-                else: # "Ask more" or other options
-                    # Show another random line or contextual information
-                    if self.dialogue_target_npc and self.dialogue_target_npc.dialogue_options:
-                        self.dialogue_text = random.choice(self.dialogue_target_npc.dialogue_options)
-                    else:
-                        self.dialogue_text = "They have nothing more to say."
-                    self.dialogue_choices = ["Ask more", "Goodbye"]
-                
-                self.selected_choice_idx = 0
-
-            elif event.key == pygame.K_ESCAPE:
-                self.state = GameState.PLAYING
-                self.dialogue_target_npc = None
-
-    def handle_inventory_input(self, event):
-        if event.type == pygame.KEYDOWN:
-            if event.key == pygame.K_ESCAPE or event.key == pygame.K_i:
-                self.state = GameState.PLAYING
-            elif event.key == pygame.K_h:  # Use health potion from inventory
-                self.use_item("Health Potion")
-
-    def handle_quest_log_input(self, event):
-        if event.type == pygame.KEYDOWN:
-            if event.key == pygame.K_ESCAPE or event.key == pygame.K_q:
-                self.state = GameState.PLAYING
-            elif event.key == pygame.K_UP:
-                self.quest_log_scroll = max(0, self.quest_log_scroll - 1)
-            elif event.key == pygame.K_DOWN:
-                max_scroll = max(0, len(self.player.active_quests) - 3) if self.player else 0
-                self.quest_log_scroll = min(max_scroll, self.quest_log_scroll + 1)
-
-    def handle_game_over_input(self, event):
-        if event.type == pygame.KEYDOWN:
-            if event.key == pygame.K_r:
-                # Restart game
-                self.player = None
-                self.state = GameState.NAME_INPUT
-                self.input_text = ""
-                self.create_initial_rooms()
-                self.create_story_quests()
-                self.show_notification("Game restarted!", 2)
-            elif event.key == pygame.K_ESCAPE:
-                self.running = False
-
-    def update_player_movement(self):
-        if not self.player: return
-        
-        keys = pygame.key.get_pressed()
-        dx, dy = 0, 0
-        if keys[pygame.K_w] or keys[pygame.K_UP]: dy -= self.player.speed
-        if keys[pygame.K_s] or keys[pygame.K_DOWN]: dy += self.player.speed
-        if keys[pygame.K_a] or keys[pygame.K_LEFT]: dx -= self.player.speed
-        if keys[pygame.K_d] or keys[pygame.K_RIGHT]: dx += self.player.speed
-
-        if dx != 0 or dy != 0:
-            new_rect = self.player.rect.move(dx, 0)
-            if not self.check_wall_collision(new_rect):
-                self.player.rect = new_rect
-            
-            new_rect = self.player.rect.move(0, dy)
-            if not self.check_wall_collision(new_rect):
-                self.player.rect = new_rect
-
-            # Boundary checks for screen (though ideally rooms handle this with walls)
-            self.player.rect.clamp_ip(self.screen.get_rect())
-
-
-    def check_wall_collision(self, rect: pygame.Rect) -> bool:
-        if not self.player: return True # No player, no movement
-        current_room_obj = self.rooms[self.player.current_room]
-        
-        # Check collision with screen boundaries first (acting as outer walls)
-        if rect.left < 0 or rect.right > SCREEN_WIDTH or rect.top < 0 or rect.bottom > SCREEN_HEIGHT:
-            return True
-
-        # Check collision with tiles
-        for r_idx, row in enumerate(current_room_obj.grid):
-            for c_idx, tile_type in enumerate(row):
-                if tile_type == TileType.WALL:
-                    wall_rect = pygame.Rect(c_idx * TILE_SIZE, r_idx * TILE_SIZE, TILE_SIZE, TILE_SIZE)
-                    if rect.colliderect(wall_rect):
-                        return True
-        return False
-
-    def handle_events(self):
-        for event in pygame.event.get():
-            if event.type == pygame.QUIT:
-                self.running = False # Consider save prompt here
-            
-            if self.state == GameState.NAME_INPUT:
-                self.handle_name_input(event)
-            elif self.state == GameState.PLAYING:
-                self.handle_playing_input(event)
-            elif self.state == GameState.DIALOGUE:
-                self.handle_dialogue_input(event)
-            elif self.state == GameState.INVENTORY:
-                self.handle_inventory_input(event)
-            elif self.state == GameState.QUEST_LOG:
-                self.handle_quest_log_input(event)
-            elif self.state == GameState.SETTINGS:
-                self.handle_settings_input(event)
-            elif self.state == GameState.GAME_OVER:
-                self.handle_game_over_input(event)
-    
-    def update(self):
-        if self.state == GameState.PLAYING:
-            self.update_player_movement()
-            if self.player:
-                # Update attack cooldown
-                if self.player.attack_cooldown > 0:
-                    self.player.attack_cooldown -= 1
-                
-                if self.player.current_room in self.rooms:
-                    self.update_enemies()
-        elif self.state == GameState.COMBAT:
-            self.update_combat()
-        
-        if self.notification_timer > 0:
-            self.notification_timer -=1
-            if self.notification_timer == 0:
-                self.notification_text = ""
-    
-    def update_enemies(self):
-        """Update all enemies in the current room"""
-        if not self.player: return
-        
         current_room = self.rooms[self.player.current_room]
-        player_rect = self.player.rect
         
-        # Check if we need to spawn enemies based on difficulty
-        if len(current_room.enemies) < max(1, current_room.difficulty_level // 2) and random.random() < 0.005:
-            self.spawn_enemy_in_room(current_room)
+        # Check screen edge transitions first
+        if rect.right <= 0:
+            self.transition_to_adjacent_room("west")
+            return False
+        elif rect.left >= SCREEN_WIDTH:
+            self.transition_to_adjacent_room("east")
+            return False
+        elif rect.bottom <= 0:
+            self.transition_to_adjacent_room("north")
+            return False
+        elif rect.top >= SCREEN_HEIGHT:
+            self.transition_to_adjacent_room("south")
+            return False
         
-        # Update enemy behaviors and movements
-        for enemy in current_room.enemies[:]:  # Use a copy in case we remove enemies during iteration
-            # Update enemy behavior based on player position
-            enemy.update_behavior(player_rect)
-            
-            # Check if enemy attacks player
-            is_attacking = enemy.update_movement(player_rect, lambda rect: self.check_collision_with_walls(rect, current_room))
-            
-            if is_attacking:
-                self.player.health -= enemy.damage
-                self.show_notification(f"Took {enemy.damage} damage from {enemy.enemy_type.name.lower()}", 1)
-                
-                # Check if player died
-                if self.player.health <= 0:
-                    self.state = GameState.GAME_OVER
-                    self.show_notification("You have died!", 5)
-                    return
-                
-                # Enter combat state
-                self.state = GameState.COMBAT
-                self.combat_enemy = enemy
-                self.combat_timer = 30  # Give player a moment to react
-            
-            # Check if player collides with enemy (melee attack)
-            if player_rect.colliderect(enemy.rect) and self.player.attack_cooldown <= 0:
-                player_damage = 5  # Basic player damage
-                defeated = enemy.take_damage(player_damage)
-                self.show_notification(f"Hit enemy for {player_damage} damage", 1)
-                self.player.attack_cooldown = 30
-                
-                if defeated:
-                    current_room.enemies.remove(enemy)
-                    # Chance to drop loot
-                    if random.random() < 0.3:
-                        self.drop_enemy_loot(enemy, current_room)
-                    self.show_notification(f"Defeated {enemy.enemy_type.name.lower()}", 2)
-    
-    def update_combat(self):
-        """Handle the combat state"""
-        if self.combat_timer > 0:
-            self.combat_timer -= 1
-            if self.combat_timer <= 0:
-                # Return to normal gameplay after the combat timer expires
-                self.state = GameState.PLAYING
-
-    def drop_enemy_loot(self, enemy, room):
-        """Generate and drop loot from a defeated enemy"""
-        # Loot tables based on enemy types
-        loot_tables = {
-            EnemyType.SLIME: [
-                ("Slime Gel", "A sticky substance. Useful for crafting.", ItemType.TREASURE, 1, 5),
-            ],
-            EnemyType.SKELETON: [
-                ("Bone Fragment", "A bone fragment from a skeleton.", ItemType.TREASURE, 1, 10),
-                ("Rusty Sword", "An old sword dropped by a skeleton.", ItemType.TREASURE, 1, 15),
-            ],
-            EnemyType.GOBLIN: [
-                ("Goblin Cloth", "A piece of fabric from goblin clothing.", ItemType.TREASURE, 1, 12),
-                ("Goblin Dagger", "A small dagger used by goblins.", ItemType.TREASURE, 1, 20),
-            ],
-            EnemyType.BAT: [
-                ("Bat Wing", "The wing of a bat.", ItemType.TREASURE, 1, 8),
-            ],
-            EnemyType.SPIDER: [
-                ("Spider Silk", "Strong silk from a spider.", ItemType.TREASURE, 1, 15),
-                ("Venom Sac", "Contains spider venom.", ItemType.TREASURE, 1, 25),
-            ]
-        }
+        # Check wall tiles within the current room
+        left_tile = rect.left // TILE_SIZE
+        right_tile = rect.right // TILE_SIZE
+        top_tile = rect.top // TILE_SIZE
+        bottom_tile = rect.bottom // TILE_SIZE
         
-        # Select a random item from the loot table
-        if enemy.enemy_type in loot_tables:
-            loot_options = loot_tables[enemy.enemy_type]
-            if loot_options:
-                loot_data = random.choice(loot_options)
-                name, desc, item_type, quantity, value = loot_data
-                
-                # Create the item at the enemy's position
-                item = Item(name, desc, item_type, quantity, value)
-                item.x = enemy.rect.centerx // TILE_SIZE
-                item.y = enemy.rect.centery // TILE_SIZE
-                
-                # Add to room
-                room.add_item(item)
-                
-    def check_collision_with_walls(self, rect, room):
-        """Check if a rectangle collides with walls in the room"""
-        # Get the tile coordinates of the rectangle corners
-        left = max(0, rect.left // TILE_SIZE)
-        right = min(room.grid_width - 1, rect.right // TILE_SIZE)
-        top = max(0, rect.top // TILE_SIZE)
-        bottom = min(room.grid_height - 1, rect.bottom // TILE_SIZE)
-        
-        # Check each tile the rectangle overlaps
-        for y in range(top, bottom + 1):
-            for x in range(left, right + 1):
-                if room.grid[y][x] == TileType.WALL:
+        for y in range(max(0, top_tile), min(current_room.grid_height, bottom_tile + 1)):
+            for x in range(max(0, left_tile), min(current_room.grid_width, right_tile + 1)):
+                if current_room.grid[y][x] == TileType.WALL:
                     return True
         return False
-                
-    def spawn_enemy_in_room(self, room):
-        """Spawn an appropriate enemy in the room"""
-        # Determine appropriate enemy types for room biome
-        enemy_types_by_biome = {
-            "cave": [EnemyType.BAT, EnemyType.SPIDER],
-            "forest": [EnemyType.SLIME, EnemyType.GOBLIN],
-            "dungeon": [EnemyType.SKELETON, EnemyType.SPIDER],
-            "ruins": [EnemyType.SKELETON, EnemyType.BAT],
-            "swamp": [EnemyType.SLIME, EnemyType.SPIDER],
-            "mountain": [EnemyType.BAT, EnemyType.GOBLIN],
-            "village": [EnemyType.GOBLIN],  # Less creatures in villages
-        }
-        
-        # Get appropriate enemy types or default to all types
-        available_types = enemy_types_by_biome.get(room.room_type, list(EnemyType))
-        enemy_type = random.choice(available_types)
-        
-        # Find a valid spawn position (a floor tile away from player)
-        valid_positions = []
-        player_tile_x, player_tile_y = 0, 0
-        
-        if self.player:
-            player_tile_x = self.player.rect.centerx // TILE_SIZE
-            player_tile_y = self.player.rect.centery // TILE_SIZE
-        
-        min_distance = 5  # Minimum tile distance from player
-        
-        for y in range(room.grid_height):
-            for x in range(room.grid_width):
-                if room.grid[y][x] == TileType.FLOOR:
-                    # Check distance from player
-                    dx = x - player_tile_x
-                    dy = y - player_tile_y
-                    distance = math.sqrt(dx*dx + dy*dy)
-                    
-                    if distance >= min_distance:
-                        valid_positions.append((x, y))
-        
-        if valid_positions:
-            spawn_x, spawn_y = random.choice(valid_positions)
-            enemy_rect = pygame.Rect(spawn_x * TILE_SIZE, spawn_y * TILE_SIZE, TILE_SIZE, TILE_SIZE)
-            
-            # Scale health based on room difficulty
-            base_health = 10
-            health = base_health * (1 + room.difficulty_level * 0.2)
-            
-            # Create and add the enemy
-            enemy = Enemy(enemy_type, enemy_rect, health=int(health))
-            room.enemies.append(enemy)
-            
-            # Set patrol points for patrolling behavior
-            if enemy.behavior == EnemyBehavior.PATROL:
-                patrol_radius = random.randint(3, 6) * TILE_SIZE
-                center_x, center_y = enemy_rect.center
-                
-                # Create 2-4 patrol points around spawn position
-                num_points = random.randint(2, 4)
-                patrol_points = []
-                
-                for _ in range(num_points):
-                    angle = random.uniform(0, 2 * math.pi)
-                    distance = random.uniform(0.5, 1.0) * patrol_radius
-                    
-                    px = center_x + int(math.cos(angle) * distance)
-                    py = center_y + int(math.sin(angle) * distance)
-                    
-                    patrol_points.append((px, py))
-                
-                enemy.set_patrol_points(patrol_points)
 
-    def render(self):
-        """Main render method"""
-        self.screen.fill(BLACK)
+    def update_player_movement(self, keys):
+        """Update player movement based on input"""
+        if not self.player:
+            return
+            
+        old_pos = self.player.rect.topleft
         
-        if self.state == GameState.NAME_INPUT:
-            self.render_name_input()
-        elif self.state == GameState.PLAYING:
-            self.render_game()
-        elif self.state == GameState.DIALOGUE:
-            self.render_game()
-            self.render_dialogue()
-        elif self.state == GameState.INVENTORY:
-            self.render_game()
-            self.render_inventory()
-        elif self.state == GameState.QUEST_LOG:
-            self.render_game()
-            self.render_quest_log()
-        elif self.state == GameState.SETTINGS:
-            self.render_game()
-            self.render_settings()
-        elif self.state == GameState.COMBAT:
-            self.render_game()
-            self.render_combat()
-        elif self.state == GameState.GAME_OVER:
-            self.render_game_over()
+        if keys[pygame.K_w] or keys[pygame.K_UP]:
+            self.player.rect.y -= self.player.speed
+        if keys[pygame.K_s] or keys[pygame.K_DOWN]:
+            self.player.rect.y += self.player.speed
+        if keys[pygame.K_a] or keys[pygame.K_LEFT]:
+            self.player.rect.x -= self.player.speed
+        if keys[pygame.K_d] or keys[pygame.K_RIGHT]:
+            self.player.rect.x += self.player.speed
         
-        # Render notifications
-        if self.notification_timer > 0:
-            self.render_notification()
-        
-        pygame.display.flip()
-
-    def render_name_input(self):
-        """Render the name input screen"""
-        title_text = self.font_large.render("Procedural Adventure", True, ADVENTURE_GOLD)
-        title_rect = title_text.get_rect(center=(SCREEN_WIDTH // 2, SCREEN_HEIGHT // 4))
-        self.screen.blit(title_text, title_rect)
-        
-        prompt_text = self.font_medium.render("Enter your name:", True, WHITE)
-        prompt_rect = prompt_text.get_rect(center=(SCREEN_WIDTH // 2, SCREEN_HEIGHT // 2 - 50))
-        self.screen.blit(prompt_text, prompt_rect)
-        
-        # Input box
-        input_box = pygame.Rect(SCREEN_WIDTH // 2 - 150, SCREEN_HEIGHT // 2, 300, 40)
-        pygame.draw.rect(self.screen, WHITE, input_box, 2)
-        
-        text_surface = self.font_medium.render(self.input_text, True, WHITE)
-        self.screen.blit(text_surface, (input_box.x + 5, input_box.y + 5))
-        
-        instructions = self.font_small.render("Press Enter to start", True, LIGHT_GRAY)
-        inst_rect = instructions.get_rect(center=(SCREEN_WIDTH // 2, SCREEN_HEIGHT // 2 + 80))
-        self.screen.blit(instructions, inst_rect)
+        # Check for collisions (but don't clamp to screen edges)
+        if self.check_wall_collision(self.player.rect):
+            self.player.rect.topleft = old_pos
 
     def render_game(self):
-        """Render the main game view"""
+        """Render the game world"""
         if not self.player or self.player.current_room not in self.rooms:
             return
-        
+            
         current_room = self.rooms[self.player.current_room]
         
-        # Render room tiles
+        # Clear screen
+        self.screen.fill(BLACK)
+        
+        # Draw room tiles
         for y in range(current_room.grid_height):
             for x in range(current_room.grid_width):
                 tile_rect = pygame.Rect(x * TILE_SIZE, y * TILE_SIZE, TILE_SIZE, TILE_SIZE)
                 tile_type = current_room.grid[y][x]
                 
-                # Get appropriate texture based on tile type
                 if tile_type == TileType.FLOOR:
                     texture = resources.get_texture(current_room.floor_texture)
+                    if texture:
+                        self.screen.blit(texture, tile_rect)
+                    else:
+                        self.screen.fill(FLOOR_COLOR, tile_rect)
+                        
                 elif tile_type == TileType.WALL:
                     texture = resources.get_texture(current_room.wall_texture)
-                elif tile_type == TileType.EXIT:
-                    # Use special exit texture or fallback to orange colored tile
-                    texture = resources.get_texture("exit")
-                    if not texture or texture.get_size() == (32, 32) and texture.get_at((0, 0)) == (255, 0, 255):
-                        # Fallback to colored rectangle if no texture found
-                        pygame.draw.rect(self.screen, QUEST_COLOR, tile_rect)
-                        pygame.draw.rect(self.screen, DARK_GRAY, tile_rect, 1)
-                        continue
+                    if texture:
+                        self.screen.blit(texture, tile_rect)
+                    else:
+                        self.screen.fill(WALL_COLOR, tile_rect)
+                        
                 elif tile_type == TileType.WATER:
                     texture = resources.get_texture("water")
+                    if texture:
+                        self.screen.blit(texture, tile_rect)
+                    else:
+                        self.screen.fill(BLUE, tile_rect)
+                        
                 elif tile_type == TileType.CHEST:
-                    texture = resources.get_texture("chest")
-                else:
-                    # Fallback for unknown tile types
-                    pygame.draw.rect(self.screen, GRAY, tile_rect)
-                    pygame.draw.rect(self.screen, DARK_GRAY, tile_rect, 1)
-                    continue
-                
-                # Blit the texture
-                self.screen.blit(texture, tile_rect)
-                
-                # Add subtle tile borders for visibility (optional)
-                pygame.draw.rect(self.screen, DARK_GRAY, tile_rect, 1)
+                    # Draw floor first
+                    floor_texture = resources.get_texture(current_room.floor_texture)
+                    if floor_texture:
+                        self.screen.blit(floor_texture, tile_rect)
+                    else:
+                        self.screen.fill(FLOOR_COLOR, tile_rect)
+                    # Draw chest on top
+                    chest_texture = resources.get_texture("chest")
+                    if chest_texture:
+                        self.screen.blit(chest_texture, tile_rect)
+                    else:
+                        pygame.draw.rect(self.screen, ADVENTURE_BROWN, tile_rect)
+                        
+                elif tile_type == TileType.EXIT:
+                    # Draw floor first
+                    floor_texture = resources.get_texture(current_room.floor_texture)
+                    if floor_texture:
+                        self.screen.blit(floor_texture, tile_rect)
+                    else:
+                        self.screen.fill(FLOOR_COLOR, tile_rect)
+                    # Draw exit indicator
+                    pygame.draw.rect(self.screen, QUEST_COLOR, tile_rect, 3)
         
-        # Render items
+        # Draw items with textures
         for item in current_room.items:
-            if item.x is not None and item.y is not None:
-                item_rect = pygame.Rect(item.x * TILE_SIZE + 8, item.y * TILE_SIZE + 8, TILE_SIZE - 16, TILE_SIZE - 16)
-                color = SPECIAL_ITEM_COLOR if item.item_type == ItemType.KEY_ITEM else ITEM_COLOR
-                pygame.draw.ellipse(self.screen, color, item_rect)
+            item_rect = pygame.Rect(item.x * TILE_SIZE, item.y * TILE_SIZE, TILE_SIZE, TILE_SIZE)
+            texture_name = self.get_item_texture_name(item.name)
+            texture = resources.get_texture(texture_name)
+            if texture:
+                self.screen.blit(texture, item_rect)
+            else:
+                pygame.draw.rect(self.screen, ITEM_COLOR, item_rect)
         
-        # Render NPCs
+        # Draw NPCs with textures and interaction indicators
+        interaction_distance = TILE_SIZE + 10
         for npc in current_room.npcs:
-            pygame.draw.rect(self.screen, NPC_COLOR, npc.rect)
-            # Add a simple face
-            pygame.draw.circle(self.screen, WHITE, (npc.rect.centerx, npc.rect.centery - 5), 3)
+            texture_name = self.get_npc_texture_name(npc.name)
+            texture = resources.get_texture(texture_name)
+            if texture:
+                self.screen.blit(texture, npc.rect)
+            else:
+                pygame.draw.rect(self.screen, npc.color, npc.rect)
+            
+            # Show interaction indicator if player is nearby
+            if self.player:
+                distance = math.sqrt((self.player.rect.centerx - npc.rect.centerx)**2 + 
+                                   (self.player.rect.centery - npc.rect.centery)**2)
+                if distance <= interaction_distance:
+                    # Draw "Press SPACE to talk" indicator
+                    indicator_text = self.font_tiny.render("Press SPACE", True, WHITE)
+                    indicator_rect = indicator_text.get_rect()
+                    indicator_rect.centerx = npc.rect.centerx
+                    indicator_rect.bottom = npc.rect.top - 5
+                    
+                    # Background for text
+                    bg_rect = indicator_rect.inflate(4, 2)
+                    pygame.draw.rect(self.screen, BLACK, bg_rect)
+                    pygame.draw.rect(self.screen, WHITE, bg_rect, 1)
+                    
+                    self.screen.blit(indicator_text, indicator_rect)
         
-        # Render enemies
+        # Draw enemies (they have their own draw method)
         for enemy in current_room.enemies:
-            # Use the enemy's draw method which supports textures
-            enemy.draw(self.screen, resources.get_texture, enemy.is_hit)
+            enemy.draw(self.screen, resources.get_texture)
         
-        # Render player
+        # Draw player
         player_texture = resources.get_texture("player")
-        self.screen.blit(player_texture, self.player.rect)
-        # Add simple player direction indicator
-        pygame.draw.circle(self.screen, WHITE, (self.player.rect.centerx, self.player.rect.centery - 5), 2)
+        if player_texture:
+            self.screen.blit(player_texture, self.player.rect)
+        else:
+            pygame.draw.rect(self.screen, PLAYER_COLOR, self.player.rect)
         
-        # Render UI
-        self.render_ui()
+        # Draw UI
+        self.draw_ui()
 
-    def get_biome_floor_color(self, room_type: str):
-        """Get floor color based on room biome"""
-        colors = {
-            "cave": CAVE_FLOOR_COLOR,
-            "forest": FOREST_FLOOR_COLOR,
-            "dungeon": DUNGEON_FLOOR_COLOR,
-            "village": VILLAGE_FLOOR_COLOR,
-            "mountain": MOUNTAIN_FLOOR_COLOR,
-            "swamp": SWAMP_FLOOR_COLOR,
-            "ruins": RUINS_FLOOR_COLOR,
-            "clearing": CLEARING_FLOOR_COLOR
-        }
-        return colors.get(room_type, FLOOR_COLOR)
-
-    def get_biome_wall_color(self, room_type: str):
-        """Get wall color based on room biome"""
-        colors = {
-            "cave": CAVE_WALL_COLOR,
-            "forest": FOREST_WALL_COLOR,
-            "dungeon": DUNGEON_WALL_COLOR,
-            "village": VILLAGE_WALL_COLOR,
-            "mountain": MOUNTAIN_WALL_COLOR,
-            "swamp": SWAMP_WALL_COLOR,
-            "ruins": RUINS_WALL_COLOR,
-            "clearing": CLEARING_WALL_COLOR
-        }
-        return colors.get(room_type, WALL_COLOR)
-
-    def get_enemy_color(self, enemy_type: EnemyType):
-        """Get color for different enemy types"""
-        colors = {
-            EnemyType.SLIME: (50, 255, 50),    # Green
-            EnemyType.SKELETON: (200, 200, 200), # Gray
-            EnemyType.GOBLIN: (255, 100, 100),   # Red
-            EnemyType.BAT: (100, 50, 200),       # Purple
-            EnemyType.SPIDER: (50, 50, 50)       # Dark gray
-        }
-        return colors.get(enemy_type, RED)
-
-    def render_ui(self):
-        """Render the UI overlay"""
+    def draw_ui(self):
+        """Draw the game UI"""
         if not self.player:
             return
-        
+            
         # Health bar
-        health_bar_bg = pygame.Rect(10, 10, 200, 20)
-        pygame.draw.rect(self.screen, DARK_GRAY, health_bar_bg)
+        health_bar_width = 200
+        health_bar_height = 20
+        health_x = 10
+        health_y = 10
         
-        health_percent = self.player.health / self.player.max_health
-        health_bar_fill = pygame.Rect(10, 10, int(200 * health_percent), 20)
-        health_color = GREEN if health_percent > 0.5 else (255, int(255 * health_percent * 2), 0)
-        pygame.draw.rect(self.screen, health_color, health_bar_fill)
+        # Background
+        pygame.draw.rect(self.screen, DARK_GRAY, 
+                        (health_x, health_y, health_bar_width, health_bar_height))
         
-        health_text = self.font_small.render(f"HP: {self.player.health}/{self.player.max_health}", True, WHITE)
-        self.screen.blit(health_text, (15, 12))
+        # Health fill
+        health_percentage = self.player.health / self.player.max_health
+        health_fill_width = int(health_bar_width * health_percentage)
+        health_color = GREEN if health_percentage > 0.3 else RED
+        pygame.draw.rect(self.screen, health_color,
+                        (health_x, health_y, health_fill_width, health_bar_height))
         
-        # Room name
-        room_text = self.font_small.render(f"Location: {self.player.current_room}", True, WHITE)
-        self.screen.blit(room_text, (10, 40))
+        # Health text
+        health_text = self.font_small.render(f"HP: {self.player.health}/{self.player.max_health}", 
+                                           True, WHITE)
+        self.screen.blit(health_text, (health_x, health_y + health_bar_height + 5))
         
-        # Gold
+        # Player info
+        info_y = health_y + health_bar_height + 30
+        level_text = self.font_small.render(f"Level: {self.player.level}", True, WHITE)
+        self.screen.blit(level_text, (health_x, info_y))
+        
         gold_text = self.font_small.render(f"Gold: {self.player.gold}", True, ADVENTURE_GOLD)
-        self.screen.blit(gold_text, (10, 60))
+        self.screen.blit(gold_text, (health_x, info_y + 25))
         
-        # Level and XP
-        level_text = self.font_small.render(f"Level: {self.player.level} XP: {self.player.experience}", True, WHITE)
-        self.screen.blit(level_text, (10, 80))
+        # Current room
+        room_text = self.font_small.render(f"Room: {self.player.current_room}", True, WHITE)
+        self.screen.blit(room_text, (health_x, info_y + 50))
         
-        # Controls reminder
-        controls_text = self.font_tiny.render("E: Interact | I: Inventory | Q: Quests | H: Health Potion | TAB: Settings", True, LIGHT_GRAY)
-        self.screen.blit(controls_text, (10, SCREEN_HEIGHT - 25))
-
-    def render_dialogue(self):
-        """Render dialogue interface"""
-        # Background
-        dialogue_bg = pygame.Rect(50, SCREEN_HEIGHT - 200, SCREEN_WIDTH - 100, 150)
-        pygame.draw.rect(self.screen, UI_BG_COLOR, dialogue_bg)
-        pygame.draw.rect(self.screen, UI_BORDER_COLOR, dialogue_bg, 3)
-        
-        # NPC name
-        if self.dialogue_target_npc:
-            name_text = self.font_medium.render(self.dialogue_target_npc.name, True, NPC_COLOR)
-            self.screen.blit(name_text, (60, SCREEN_HEIGHT - 190))
-        
-        # Dialogue text
-        dialogue_lines = self.wrap_text(self.dialogue_text, self.font_small, SCREEN_WIDTH - 120)
-        y_offset = SCREEN_HEIGHT - 160
-        for line in dialogue_lines[:3]:  # Show max 3 lines
-            text_surface = self.font_small.render(line, True, WHITE)
-            self.screen.blit(text_surface, (60, y_offset))
-            y_offset += 25
-        
-        # Choices
-        choice_y = SCREEN_HEIGHT - 90
-        for i, choice in enumerate(self.dialogue_choices):
-            color = QUEST_COLOR if i == self.selected_choice_idx else WHITE
-            choice_text = self.font_small.render(f"> {choice}", True, color)
-            self.screen.blit(choice_text, (60, choice_y))
-            choice_y += 20
-
-    def render_inventory(self):
-        """Render inventory interface"""
-        # Background
-        inv_bg = pygame.Rect(200, 100, 400, 300)
-        pygame.draw.rect(self.screen, UI_BG_COLOR, inv_bg)
-        pygame.draw.rect(self.screen, UI_BORDER_COLOR, inv_bg, 3)
-        
-        # Title
-        title_text = self.font_medium.render("Inventory", True, WHITE)
-        self.screen.blit(title_text, (210, 110))
-        
-        # Items
-        y_offset = 150
-        if self.player.inventory:
-            for item in self.player.inventory:
-                item_text = f"{item.name} x{item.quantity}"
-                if item.value > 0:
-                    item_text += f" ({item.value}g)"
-                
-                color = SPECIAL_ITEM_COLOR if item.item_type == ItemType.KEY_ITEM else WHITE
-                text_surface = self.font_small.render(item_text, True, color)
-                self.screen.blit(text_surface, (210, y_offset))
-                y_offset += 25
-                
-                if y_offset > 380:  # Don't overflow the box
-                    break
-        else:
-            empty_text = self.font_small.render("Empty", True, GRAY)
-            self.screen.blit(empty_text, (210, y_offset))
-        
-        # Instructions
-        inst_text = self.font_tiny.render("Press H to use Health Potions, ESC to close", True, LIGHT_GRAY)
-        self.screen.blit(inst_text, (210, 380))
-
-    def render_quest_log(self):
-        """Render quest log interface"""
-        # Background
-        quest_bg = pygame.Rect(150, 80, 500, 350)
-        pygame.draw.rect(self.screen, UI_BG_COLOR, quest_bg)
-        pygame.draw.rect(self.screen, UI_BORDER_COLOR, quest_bg, 3)
-        
-        # Title
-        title_text = self.font_medium.render("Quest Log", True, QUEST_COLOR)
-        self.screen.blit(title_text, (160, 90))
-        
-        # Active quests
-        y_offset = 120
-        if self.player and self.player.active_quests:
-            for quest_id in self.player.active_quests:
-                if quest_id in self.quests:
-                    quest = self.quests[quest_id]
-                    
-                    # Quest title
-                    title = self.font_small.render(quest.title, True, QUEST_COLOR)
-                    self.screen.blit(title, (160, y_offset))
-                    y_offset += 25
-                    
-                    # Quest description
-                    desc_lines = self.wrap_text(quest.description, self.font_tiny, 480)
-                    for line in desc_lines[:2]:
-                        desc_surface = self.font_tiny.render(line, True, WHITE)
-                        self.screen.blit(desc_surface, (170, y_offset))
-                        y_offset += 18
-                    
-                    # Objectives
-                    for i, objective in enumerate(quest.objectives):
-                        status = "✓" if quest.completed_objectives[i] else "○"
-                        obj_text = f"  {status} {objective}"
-                        color = GREEN if quest.completed_objectives[i] else WHITE
-                        obj_surface = self.font_tiny.render(obj_text, True, color)
-                        self.screen.blit(obj_surface, (170, y_offset))
-                        y_offset += 18
-                    
-                    y_offset += 10  # Space between quests
-                    
-                    if y_offset > 400:  # Don't overflow
-                        break
-        else:
-            no_quests_text = self.font_small.render("No active quests", True, GRAY)
-            self.screen.blit(no_quests_text, (160, y_offset))
-        
-        # Instructions
-        inst_text = self.font_tiny.render("ESC to close", True, LIGHT_GRAY)
-        self.screen.blit(inst_text, (160, 410))
-
-    def render_settings(self):
-        """Render settings interface"""
-        # Background
-        settings_bg = pygame.Rect(300, 150, 300, 250)
-        pygame.draw.rect(self.screen, UI_BG_COLOR, settings_bg)
-        pygame.draw.rect(self.screen, UI_BORDER_COLOR, settings_bg, 3)
-        
-        # Title
-        title_text = self.font_medium.render("Settings", True, WHITE)
-        self.screen.blit(title_text, (310, 160))
-        
-        # Settings options
-        y_offset = 190
-        for i, option in enumerate(self.settings_options):
-            color = QUEST_COLOR if i == self.settings_selection else WHITE
+        # Show notification
+        if self.notification_timer > 0:
+            notification_surface = self.font_medium.render(self.notification_text, True, WHITE)
+            notification_rect = notification_surface.get_rect()
+            notification_rect.centerx = SCREEN_WIDTH // 2
+            notification_rect.y = 50
             
-            if option == "Master Volume":
-                text = f"Master Volume: {self.settings.master_volume:.1f}"
-            elif option == "SFX Volume":
-                text = f"SFX Volume: {self.settings.sfx_volume:.1f}"
-            elif option == "Music Volume":
-                text = f"Music Volume: {self.settings.music_volume:.1f}"
-            elif option == "Screen Scale":
-                text = f"Screen Scale: {self.settings.screen_scale:.1f}x"
-            elif option == "Fullscreen":
-                text = f"Fullscreen: {'On' if self.settings.fullscreen else 'Off'}"
-            else:
-                text = option
-            
-            option_surface = self.font_small.render(text, True, color)
-            self.screen.blit(option_surface, (310, y_offset))
-            y_offset += 25
-        
-        # Instructions
-        inst_text = self.font_tiny.render("Arrow keys to navigate, Enter to select", True, LIGHT_GRAY)
-        self.screen.blit(inst_text, (310, 380))
-
-    def render_combat(self):
-        """Render combat interface"""
-        if hasattr(self, 'combat_enemy') and self.combat_enemy:
-            combat_text = self.font_medium.render("COMBAT!", True, RED)
-            text_rect = combat_text.get_rect(center=(SCREEN_WIDTH // 2, 50))
-            self.screen.blit(combat_text, text_rect)
-
-    def render_game_over(self):
-        """Render game over screen"""
-        self.screen.fill(BLACK)
-        
-        game_over_text = self.font_large.render("GAME OVER", True, RED)
-        text_rect = game_over_text.get_rect(center=(SCREEN_WIDTH // 2, SCREEN_HEIGHT // 2 - 50))
-        self.screen.blit(game_over_text, text_rect)
-        
-        restart_text = self.font_medium.render("Press R to restart or ESC to quit", True, WHITE)
-        restart_rect = restart_text.get_rect(center=(SCREEN_WIDTH // 2, SCREEN_HEIGHT // 2 + 50))
-        self.screen.blit(restart_text, restart_rect)
-
-    def render_notification(self):
-        """Render notification overlay"""
-        if self.notification_text:
             # Background
-            text_surface = self.font_small.render(self.notification_text, True, WHITE)
-            text_rect = text_surface.get_rect()
+            bg_rect = notification_rect.inflate(20, 10)
+            pygame.draw.rect(self.screen, UI_BG_COLOR, bg_rect)
+            pygame.draw.rect(self.screen, UI_BORDER_COLOR, bg_rect, 2)
             
-            notification_bg = pygame.Rect(
-                SCREEN_WIDTH // 2 - text_rect.width // 2 - 10,
-                100,
-                text_rect.width + 20,
-                text_rect.height + 10
-            )
-            
-            pygame.draw.rect(self.screen, TOOLTIP_BG, notification_bg)
-            pygame.draw.rect(self.screen, WHITE, notification_bg, 2)
-            
-            # Text
-            text_pos = (SCREEN_WIDTH // 2 - text_rect.width // 2, 105)
-            self.screen.blit(text_surface, text_pos)
+            self.screen.blit(notification_surface, notification_rect)
+            self.notification_timer -= 1
 
-    def wrap_text(self, text: str, font, max_width: int) -> List[str]:
-        """Wrap text to fit within max_width"""
+    def show_notification(self, text: str, duration_seconds: float):
+        """Show a notification message"""
+        self.notification_text = text
+        self.notification_timer = int(duration_seconds * FPS)
+    
+    def handle_npc_interaction(self):
+        """Handle player interaction with nearby NPCs"""
+        if not self.player:
+            return
+            
+        current_room = self.rooms[self.player.current_room]
+        interaction_distance = TILE_SIZE + 10  # Allow some buffer distance
+        
+        # Find nearby NPCs
+        for npc in current_room.npcs:
+            distance = math.sqrt((self.player.rect.centerx - npc.rect.centerx)**2 + 
+                               (self.player.rect.centery - npc.rect.centery)**2)
+            
+            if distance <= interaction_distance:
+                self.start_dialogue_with_npc(npc)
+                return
+        
+        self.show_notification("No one nearby to talk to", 1.5)
+    
+    def start_dialogue_with_npc(self, npc: NPC):
+        """Start dialogue with an NPC"""
+        self.dialogue_target_npc = npc
+        self.state = GameState.DIALOGUE
+        
+        # Update NPC interaction data
+        npc.interaction_count += 1
+        npc.last_interaction_time = pygame.time.get_ticks()
+        
+        # Get appropriate dialogue response
+        context = "greeting"
+        if npc.interaction_count > 1:
+            context = "return_visit"
+        
+        # Generate contextual response based on NPC personality and relationship
+        self.dialogue_text = npc.get_dialogue_response(context)
+        
+        # Improve relationship slightly for friendly personalities
+        if npc.personality in [NPCPersonality.FRIENDLY, NPCPersonality.CHEERFUL]:
+            npc.modify_relationship(1)
+        elif npc.personality == NPCPersonality.GRUFF and npc.interaction_count == 1:
+            npc.modify_relationship(-1)  # Gruff NPCs are initially annoyed
+        
+        self.show_notification(f"Talking to {npc.name}", 0.5)
+    
+    def end_dialogue(self):
+        """End the current dialogue"""
+        self.dialogue_target_npc = None
+        self.dialogue_text = ""
+        self.state = GameState.PLAYING
+    
+    def render_dialogue(self):
+        """Render the dialogue interface"""
+        # Draw game background faded
+        self.render_game()
+        overlay = pygame.Surface((SCREEN_WIDTH, SCREEN_HEIGHT))
+        overlay.set_alpha(128)
+        overlay.fill(BLACK)
+        self.screen.blit(overlay, (0, 0))
+        
+        if self.dialogue_target_npc and self.dialogue_text:
+            # Dialogue box
+            dialogue_box_height = 200
+            dialogue_box_y = SCREEN_HEIGHT - dialogue_box_height - 20
+            dialogue_box = pygame.Rect(20, dialogue_box_y, SCREEN_WIDTH - 40, dialogue_box_height)
+            
+            # Draw dialogue box background
+            pygame.draw.rect(self.screen, UI_BG_COLOR, dialogue_box)
+            pygame.draw.rect(self.screen, UI_BORDER_COLOR, dialogue_box, 3)
+            
+            # NPC name
+            name_text = self.font_medium.render(self.dialogue_target_npc.name, True, WHITE)
+            self.screen.blit(name_text, (dialogue_box.x + 10, dialogue_box.y + 10))
+            
+            # Dialogue text (word wrapped)
+            text_area = pygame.Rect(dialogue_box.x + 10, dialogue_box.y + 50, 
+                                  dialogue_box.width - 20, dialogue_box.height - 100)
+            self.draw_wrapped_text(self.dialogue_text, text_area, self.font_small, WHITE)
+            
+            # Instructions
+            instruction_text = self.font_tiny.render("Press SPACE or ENTER to continue", True, LIGHT_GRAY)
+            instruction_rect = instruction_text.get_rect()
+            instruction_rect.bottomright = (dialogue_box.right - 10, dialogue_box.bottom - 10)
+            self.screen.blit(instruction_text, instruction_rect)
+            
+            # Show relationship level if it's not neutral
+            if hasattr(self.dialogue_target_npc, 'relationship_level') and self.dialogue_target_npc.relationship_level != 0:
+                rel_level = self.dialogue_target_npc.relationship_level
+                if rel_level > 0:
+                    rel_text = f"Relationship: +{rel_level}"
+                    rel_color = GREEN
+                else:
+                    rel_text = f"Relationship: {rel_level}"
+                    rel_color = RED
+                
+                rel_surface = self.font_tiny.render(rel_text, True, rel_color)
+                self.screen.blit(rel_surface, (dialogue_box.x + 10, dialogue_box.y + dialogue_box.height - 30))
+    
+    def draw_wrapped_text(self, text: str, rect: pygame.Rect, font: pygame.font.Font, color: tuple):
+        """Draw text that wraps within a rectangle"""
         words = text.split(' ')
         lines = []
-        current_line = ""
+        current_line = []
         
         for word in words:
-            test_line = current_line + " " + word if current_line else word
-            if font.size(test_line)[0] <= max_width:
-                current_line = test_line
+            test_line = ' '.join(current_line + [word])
+            if font.size(test_line)[0] <= rect.width:
+                current_line.append(word)
             else:
                 if current_line:
-                    lines.append(current_line)
-                current_line = word
+                    lines.append(' '.join(current_line))
+                    current_line = [word]
+                else:
+                    lines.append(word)  # Single word too long, add anyway
         
         if current_line:
-            lines.append(current_line)
+            lines.append(' '.join(current_line))
         
-        return lines
+        # Draw lines
+        y_offset = 0
+        for line in lines:
+            if y_offset + font.get_height() > rect.height:
+                break  # Don't draw outside the rect
+            
+            line_surface = font.render(line, True, color)
+            self.screen.blit(line_surface, (rect.x, rect.y + y_offset))
+            y_offset += font.get_height() + 2
 
     def run(self):
         """Main game loop"""
         while self.running:
-            self.handle_events()
-            self.update()
-            self.render()
+            # Handle events
+            for event in pygame.event.get():
+                if event.type == pygame.QUIT:
+                    self.running = False
+                    
+                elif event.type == pygame.KEYDOWN:
+                    if event.key == pygame.K_ESCAPE:
+                        if self.state == GameState.PLAYING:
+                            self.state = GameState.MENU
+                        elif self.state == GameState.MENU:
+                            self.state = GameState.PLAYING
+                        else:
+                            self.state = GameState.PLAYING
+                    
+                    elif self.state == GameState.NAME_INPUT:
+                        if event.key == pygame.K_RETURN:
+                            if self.input_text.strip():
+                                # Create player
+                                self.player = Player(
+                                    name=self.input_text.strip(),
+                                    rect=pygame.Rect(SCREEN_WIDTH//2, SCREEN_HEIGHT//2, TILE_SIZE, TILE_SIZE),
+                                    current_room="Mystic Cave Entrance"
+                                )
+                                self.state = GameState.PLAYING
+                                self.show_notification(f"Welcome, {self.player.name}!", 3)
+                        elif event.key == pygame.K_BACKSPACE:
+                            self.input_text = self.input_text[:-1]
+                        else:
+                            if len(self.input_text) < 20:
+                                self.input_text += event.unicode
+                    
+                    elif self.state == GameState.PLAYING:
+                        if event.key == pygame.K_SPACE:
+                            self.handle_npc_interaction()
+                    
+                    elif self.state == GameState.DIALOGUE:
+                        if event.key == pygame.K_SPACE or event.key == pygame.K_RETURN:
+                            self.end_dialogue()
+                    
+                elif event.type == pygame.TEXTINPUT and self.state == GameState.NAME_INPUT:
+                    if event.text != '\r' and event.text != '\b':  # Ignore enter and backspace
+                        if len(self.input_text) < 20:
+                            self.input_text += event.text
+            
+            # Update game state
+            if self.state == GameState.PLAYING and self.player:
+                keys = pygame.key.get_pressed()
+                self.update_player_movement(keys)
+                
+                # Update current room entities
+                current_room = self.rooms[self.player.current_room]
+                game_ticks = pygame.time.get_ticks()
+                
+                # Update NPCs
+                for npc in current_room.npcs:
+                    npc.update_behavior(game_ticks)
+                
+                # Update enemies
+                for enemy in current_room.enemies:
+                    enemy.update_behavior(self.player.rect)
+                    enemy.update_movement(self.player.rect, self.check_wall_collision)
+            
+            # Render based on state
+            if self.state == GameState.NAME_INPUT:
+                self.render_name_input()
+            elif self.state == GameState.PLAYING:
+                self.render_game()
+            elif self.state == GameState.MENU:
+                self.render_menu()
+            elif self.state == GameState.DIALOGUE:
+                self.render_dialogue()
+            
+            pygame.display.flip()
             self.clock.tick(FPS)
         
         pygame.quit()
+        sys.exit()
 
-# Main entry point
+    def render_name_input(self):
+        """Render the name input screen"""
+        self.screen.fill(UI_BG_COLOR)
+        
+        title_text = self.font_large.render("Procedural Adventure", True, WHITE)
+        title_rect = title_text.get_rect(center=(SCREEN_WIDTH//2, SCREEN_HEIGHT//2 - 100))
+        self.screen.blit(title_text, title_rect)
+        
+        prompt_text = self.font_medium.render("Enter your name:", True, WHITE)
+        prompt_rect = prompt_text.get_rect(center=(SCREEN_WIDTH//2, SCREEN_HEIGHT//2 - 30))
+        self.screen.blit(prompt_text, prompt_rect)
+        
+        # Input box
+        input_rect = pygame.Rect(SCREEN_WIDTH//2 - 150, SCREEN_HEIGHT//2, 300, 40)
+        pygame.draw.rect(self.screen, WHITE, input_rect)
+        pygame.draw.rect(self.screen, BLACK, input_rect, 2)
+        
+        # Input text
+        input_surface = self.font_medium.render(self.input_text, True, BLACK)
+        self.screen.blit(input_surface, (input_rect.x + 5, input_rect.y + 5))
+        
+        # Instructions
+        instruction_text = self.font_small.render("Press ENTER to start", True, WHITE)
+        instruction_rect = instruction_text.get_rect(center=(SCREEN_WIDTH//2, SCREEN_HEIGHT//2 + 80))
+        self.screen.blit(instruction_text, instruction_rect)
+
+    def render_menu(self):
+        """Render the pause menu"""
+        # Draw game background faded
+        self.render_game()
+        overlay = pygame.Surface((SCREEN_WIDTH, SCREEN_HEIGHT))
+        overlay.set_alpha(128)
+        overlay.fill(BLACK)
+        self.screen.blit(overlay, (0, 0))
+        
+        # Menu options
+        menu_options = ["Resume", "Settings", "Save Game", "Load Game", "Quit"]
+        menu_y_start = SCREEN_HEIGHT // 2 - (len(menu_options) * 30) // 2
+        
+        for i, option in enumerate(menu_options):
+            color = WHITE
+            text = self.font_medium.render(option, True, color)
+            text_rect = text.get_rect(center=(SCREEN_WIDTH//2, menu_y_start + i * 50))
+            self.screen.blit(text, text_rect)
+
 if __name__ == "__main__":
     game = Game()
     game.run()

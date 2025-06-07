@@ -1,0 +1,22 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<svg xmlns="http://www.w3.org/2000/svg" width="32" height="32" viewBox="0 0 32 32">
+  <!-- Merchant -->
+  <!-- Body -->
+  <ellipse cx="16" cy="24" rx="7" ry="5" fill="#8B0000"/>
+  <!-- Clothes -->
+  <rect x="9" y="18" width="14" height="10" rx="2" fill="#8B0000"/>
+  <!-- Head -->
+  <circle cx="16" cy="12" r="5" fill="#F5DEB3"/>
+  <!-- Hat -->
+  <ellipse cx="16" cy="8" rx="6" ry="3" fill="#800080"/>
+  <rect x="10" y="8" width="12" height="2" fill="#800080"/>
+  <!-- Eyes -->
+  <circle cx="14" cy="11" r="1" fill="#000000"/>
+  <circle cx="18" cy="11" r="1" fill="#000000"/>
+  <!-- Mustache -->
+  <ellipse cx="16" cy="14" rx="2" ry="1" fill="#8B4513"/>
+  <!-- Money bag -->
+  <circle cx="26" cy="20" r="3" fill="#8B4513"/>
+  <rect x="25" y="17" width="2" height="2" fill="#8B4513"/>
+  <text x="26" y="22" text-anchor="middle" font-family="serif" font-size="4" fill="#FFD700">$</text>
+</svg>

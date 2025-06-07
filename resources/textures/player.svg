@@ -1,0 +1,49 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<svg width="32" height="32" viewBox="0 0 32 32" xmlns="http://www.w3.org/2000/svg">
+  <!-- Player character - knight/adventurer -->
+  
+  <!-- Head (skin) -->
+  <rect x="10" y="4" width="12" height="8" fill="#FFD4A3"/>
+  
+  <!-- Hair -->
+  <rect x="8" y="2" width="16" height="4" fill="#8B4513"/>
+  <rect x="8" y="4" width="2" height="4" fill="#8B4513"/>
+  <rect x="22" y="4" width="2" height="4" fill="#8B4513"/>
+  
+  <!-- Eyes -->
+  <rect x="12" y="6" width="2" height="2" fill="#000000"/>
+  <rect x="18" y="6" width="2" height="2" fill="#000000"/>
+  
+  <!-- Nose -->
+  <rect x="15" y="8" width="2" height="1" fill="#E6B887"/>
+  
+  <!-- Mouth -->
+  <rect x="14" y="10" width="4" height="1" fill="#8B0000"/>
+  
+  <!-- Body armor (silver/gray) -->
+  <rect x="8" y="12" width="16" height="12" fill="#C0C0C0"/>
+  
+  <!-- Armor details -->
+  <rect x="10" y="14" width="12" height="2" fill="#A9A9A9"/>
+  <rect x="12" y="18" width="8" height="2" fill="#A9A9A9"/>
+  
+  <!-- Arms -->
+  <rect x="4" y="14" width="4" height="8" fill="#FFD4A3"/>
+  <rect x="24" y="14" width="4" height="8" fill="#FFD4A3"/>
+  
+  <!-- Arm armor -->
+  <rect x="4" y="14" width="4" height="2" fill="#C0C0C0"/>
+  <rect x="24" y="14" width="4" height="2" fill="#C0C0C0"/>
+  
+  <!-- Legs -->
+  <rect x="10" y="24" width="4" height="8" fill="#654321"/>
+  <rect x="18" y="24" width="4" height="8" fill="#654321"/>
+  
+  <!-- Boots -->
+  <rect x="8" y="30" width="6" height="2" fill="#2F4F4F"/>
+  <rect x="18" y="30" width="6" height="2" fill="#2F4F4F"/>
+  
+  <!-- Cape -->
+  <rect x="6" y="12" width="2" height="8" fill="#8B0000"/>
+  <rect x="24" y="12" width="2" height="8" fill="#8B0000"/>
+</svg>

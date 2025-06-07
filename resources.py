@@ -1,5 +1,7 @@
 import pygame
 import os
+import xml.etree.ElementTree as ET
+from io import BytesIO
 
 # Create resources directory if it doesn't exist
 os.makedirs('resources/textures', exist_ok=True)
@@ -7,10 +9,69 @@ os.makedirs('resources/textures', exist_ok=True)
 # Dictionary to hold loaded textures
 textures = {}
 
+def svg_to_surface(svg_content, size=(32, 32)):
+    """Convert SVG content to a pygame surface using simple parsing"""
+    try:
+        # Parse the SVG XML
+        root = ET.fromstring(svg_content)
+        
+        # Create surface
+        surface = pygame.Surface(size, pygame.SRCALPHA)
+        surface.fill((0, 0, 0, 0))  # Transparent background
+        
+        # Parse all rect elements
+        for rect in root.findall('.//{http://www.w3.org/2000/svg}rect'):
+            x = int(float(rect.get('x', 0)))
+            y = int(float(rect.get('y', 0)))
+            width = int(float(rect.get('width', 0)))
+            height = int(float(rect.get('height', 0)))
+            fill = rect.get('fill', '#000000')
+            
+            # Convert hex color to RGB
+            if fill.startswith('#'):
+                fill = fill[1:]
+                if len(fill) == 6:
+                    r = int(fill[0:2], 16)
+                    g = int(fill[2:4], 16)
+                    b = int(fill[4:6], 16)
+                    color = (r, g, b)
+                else:
+                    color = (0, 0, 0)
+            else:
+                color = (0, 0, 0)
+            
+            # Draw the rectangle
+            pygame.draw.rect(surface, color, (x, y, width, height))
+        
+        return surface
+    except Exception as e:
+        print(f"Error parsing SVG: {e}")
+        # Return error surface
+        surface = pygame.Surface(size)
+        surface.fill((255, 0, 255))
+        return surface
+
 def load_texture(name, filename):
     """Load a texture from file and store it in the textures dictionary"""
     try:
         full_path = os.path.join('resources/textures', filename)
+        
+        # Check for SVG first
+        svg_path = full_path.replace('.png', '.svg')
+        if os.path.exists(svg_path):
+            with open(svg_path, 'r') as f:
+                svg_content = f.read()
+            surface = svg_to_surface(svg_content)
+            textures[name] = surface
+            return surface
+        
+        # Check for PNG
+        if os.path.exists(full_path):
+            texture = pygame.image.load(full_path).convert_alpha()
+            textures[name] = texture
+            return texture
+        
+        # Create default if neither exists
         if not os.path.exists(full_path):
             # Create a default colored surface if the texture doesn't exist
             if "wall" in name:

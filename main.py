@@ -1531,6 +1531,7 @@ class Game:
         self.font_small = pygame.font.Font(FONT_NAME, FONT_SIZE_SMALL)
         self.font_medium = pygame.font.Font(FONT_NAME, FONT_SIZE_MEDIUM)
         self.font_large = pygame.font.Font(FONT_NAME, FONT_SIZE_LARGE)
+        self.font_tiny = pygame.font.Font(FONT_NAME, FONT_SIZE_TINY)
         
         self.input_text = ""
         self.dialogue_target_npc: Optional[NPC] = None
@@ -1545,6 +1546,9 @@ class Game:
         
         self.notification_text = ""
         self.notification_timer = 0
+
+        # Initialize texture resources
+        resources.init()
 
         self.create_initial_rooms()
         self.create_story_quests()
@@ -2753,22 +2757,33 @@ class Game:
                 tile_rect = pygame.Rect(x * TILE_SIZE, y * TILE_SIZE, TILE_SIZE, TILE_SIZE)
                 tile_type = current_room.grid[y][x]
                 
+                # Get appropriate texture based on tile type
                 if tile_type == TileType.FLOOR:
-                    color = self.get_biome_floor_color(current_room.room_type)
+                    texture = resources.get_texture(current_room.floor_texture)
                 elif tile_type == TileType.WALL:
-                    color = self.get_biome_wall_color(current_room.room_type)
+                    texture = resources.get_texture(current_room.wall_texture)
                 elif tile_type == TileType.EXIT:
-                    color = QUEST_COLOR
+                    # Use special exit texture or fallback to orange colored tile
+                    texture = resources.get_texture("exit")
+                    if not texture or texture.get_size() == (32, 32) and texture.get_at((0, 0)) == (255, 0, 255):
+                        # Fallback to colored rectangle if no texture found
+                        pygame.draw.rect(self.screen, QUEST_COLOR, tile_rect)
+                        pygame.draw.rect(self.screen, DARK_GRAY, tile_rect, 1)
+                        continue
                 elif tile_type == TileType.WATER:
-                    color = BLUE
+                    texture = resources.get_texture("water")
                 elif tile_type == TileType.CHEST:
-                    color = ADVENTURE_BROWN
+                    texture = resources.get_texture("chest")
                 else:
-                    color = GRAY
+                    # Fallback for unknown tile types
+                    pygame.draw.rect(self.screen, GRAY, tile_rect)
+                    pygame.draw.rect(self.screen, DARK_GRAY, tile_rect, 1)
+                    continue
                 
-                pygame.draw.rect(self.screen, color, tile_rect)
+                # Blit the texture
+                self.screen.blit(texture, tile_rect)
                 
-                # Add tile borders for visibility
+                # Add subtle tile borders for visibility (optional)
                 pygame.draw.rect(self.screen, DARK_GRAY, tile_rect, 1)
         
         # Render items
@@ -2786,19 +2801,12 @@ class Game:
         
         # Render enemies
         for enemy in current_room.enemies:
-            enemy_color = RED if enemy.is_hit else self.get_enemy_color(enemy.enemy_type)
-            pygame.draw.rect(self.screen, enemy_color, enemy.rect)
-            
-            # Add health bar for enemies
-            if enemy.health < enemy.max_health:
-                health_bar_rect = pygame.Rect(enemy.rect.x, enemy.rect.y - 8, enemy.rect.width, 4)
-                pygame.draw.rect(self.screen, RED, health_bar_rect)
-                health_percent = enemy.health / enemy.max_health
-                health_fill = pygame.Rect(enemy.rect.x, enemy.rect.y - 8, int(enemy.rect.width * health_percent), 4)
-                pygame.draw.rect(self.screen, GREEN, health_fill)
+            # Use the enemy's draw method which supports textures
+            enemy.draw(self.screen, resources.get_texture, enemy.is_hit)
         
         # Render player
-        pygame.draw.rect(self.screen, PLAYER_COLOR, self.player.rect)
+        player_texture = resources.get_texture("player")
+        self.screen.blit(player_texture, self.player.rect)
         # Add simple player direction indicator
         pygame.draw.circle(self.screen, WHITE, (self.player.rect.centerx, self.player.rect.centery - 5), 2)
         

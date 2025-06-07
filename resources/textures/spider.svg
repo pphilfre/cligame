@@ -1,0 +1,50 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<svg width="32" height="32" viewBox="0 0 32 32" xmlns="http://www.w3.org/2000/svg">
+  <!-- Spider creature -->
+  
+  <!-- Main body/abdomen -->
+  <rect x="10" y="14" width="12" height="10" fill="#2F4F4F"/>
+  <rect x="8" y="16" width="2" height="6" fill="#2F4F4F"/>
+  <rect x="22" y="16" width="2" height="6" fill="#2F4F4F"/>
+  <rect x="10" y="12" width="12" height="2" fill="#2F4F4F"/>
+  <rect x="10" y="24" width="12" height="2" fill="#2F4F4F"/>
+  
+  <!-- Head/cephalothorax -->
+  <rect x="12" y="8" width="8" height="6" fill="#2F4F4F"/>
+  
+  <!-- Eyes (multiple) -->
+  <rect x="13" y="9" width="1" height="1" fill="#FF0000"/>
+  <rect x="15" y="9" width="1" height="1" fill="#FF0000"/>
+  <rect x="16" y="9" width="1" height="1" fill="#FF0000"/>
+  <rect x="18" y="9" width="1" height="1" fill="#FF0000"/>
+  
+  <!-- Fangs -->
+  <rect x="14" y="13" width="1" height="2" fill="#FFFFFF"/>
+  <rect x="17" y="13" width="1" height="2" fill="#FFFFFF"/>
+  
+  <!-- Legs (4 pairs) -->
+  <!-- Front legs -->
+  <rect x="4" y="10" width="6" height="2" fill="#2F4F4F"/>
+  <rect x="22" y="10" width="6" height="2" fill="#2F4F4F"/>
+  <rect x="2" y="12" width="4" height="2" fill="#2F4F4F"/>
+  <rect x="26" y="12" width="4" height="2" fill="#2F4F4F"/>
+  
+  <!-- Middle legs -->
+  <rect x="4" y="16" width="6" height="2" fill="#2F4F4F"/>
+  <rect x="22" y="16" width="6" height="2" fill="#2F4F4F"/>
+  <rect x="1" y="18" width="5" height="2" fill="#2F4F4F"/>
+  <rect x="26" y="18" width="5" height="2" fill="#2F4F4F"/>
+  
+  <!-- Back legs -->
+  <rect x="4" y="22" width="6" height="2" fill="#2F4F4F"/>
+  <rect x="22" y="22" width="6" height="2" fill="#2F4F4F"/>
+  <rect x="2" y="24" width="4" height="2" fill="#2F4F4F"/>
+  <rect x="26" y="24" width="4" height="2" fill="#2F4F4F"/>
+  
+  <!-- Body markings -->
+  <rect x="12" y="16" width="8" height="2" fill="#1C3030"/>
+  <rect x="14" y="20" width="4" height="2" fill="#1C3030"/>
+  
+  <!-- Highlight on body -->
+  <rect x="11" y="15" width="2" height="2" fill="#708090"/>
+</svg>

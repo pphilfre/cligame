@@ -236,6 +236,7 @@ class Player:
     experience: int = 0
     gold: int = 50  # Starting gold
     active_quests: List[str] = field(default_factory=list)  # Quest IDs
+    attack_cooldown: int = 0  # Attack cooldown timer
 
     def to_dict(self):
         return {
@@ -249,7 +250,8 @@ class Player:
             'level': self.level,
             'experience': self.experience,
             'gold': self.gold,
-            'active_quests': self.active_quests
+            'active_quests': self.active_quests,
+            'attack_cooldown': self.attack_cooldown
         }
     
     @classmethod
@@ -268,7 +270,8 @@ class Player:
             level=data.get('level', 1),
             experience=data.get('experience', 0),
             gold=data.get('gold', 50),
-            active_quests=data.get('active_quests', [])
+            active_quests=data.get('active_quests', []),
+            attack_cooldown=data.get('attack_cooldown', 0)
         )
 
     def has_item(self, item_name: str) -> bool:
@@ -315,16 +318,16 @@ class NPC:
     def from_dict(cls, data):
         rect_data = data['rect']
         rect = pygame.Rect(rect_data['x'], rect_data['y'], rect_data['width'], rect_data['height'])
-        shop_items = [Item.from_dict(item_data) for item_data in data.get('shop_items', [])]
-        return cls(
+        npc = cls(
             name=data['name'],
             rect=rect,
-            dialogue_options=data['dialogue_options'],
+            dialogue_options=data.get('dialogue_options', []),
             color=tuple(data.get('color', NPC_COLOR)),
             quest_giver=data.get('quest_giver', False),
-            quest_id=data.get('quest_id'),
-            shop_items=shop_items
+            quest_id=data.get('quest_id')
         )
+        npc.shop_items = [Item.from_dict(item_data) for item_data in data.get('shop_items', [])]
+        return npc
 
 
 class Room:
@@ -1402,7 +1405,7 @@ class Room:
                     ['wall', 'water', 'chest', 'wall_cluster'], 
                     weights=[0.5, 0.3, 0.1, 0.1], 
                     k=1
-                )[0]
+                )[0];
                 
                 if obj_type == 'wall':
                     self.grid[obj_y][obj_x] = TileType.WALL
@@ -1491,7 +1494,14 @@ class Room:
 class Game:
     def __init__(self):
         pygame.init()
-        pygame.mixer.init()
+        
+        # Try to initialize audio mixer, but don't fail if it's not available
+        try:
+            pygame.mixer.init()
+            self.audio_available = True
+        except pygame.error:
+            print("Audio not available, continuing without sound...")
+            self.audio_available = False
         
         # Load settings first
         self.settings = self.load_settings()
@@ -1586,10 +1596,11 @@ class Game:
             SCREEN_HEIGHT = new_height
         
         # Apply audio settings (if pygame.mixer supports it)
-        try:
-            pygame.mixer.music.set_volume(self.settings.master_volume * self.settings.music_volume)
-        except:
-            pass  # Audio might not be available
+        if self.audio_available:
+            try:
+                pygame.mixer.music.set_volume(self.settings.master_volume * self.settings.music_volume)
+            except:
+                pass  # Audio might not be available
     
     def generate_procedural_room(self, suggested_type: str = None) -> Room:
         """Generate a completely new procedural room"""
@@ -2404,7 +2415,20 @@ class Game:
             elif event.key == pygame.K_DOWN:
                 max_scroll = max(0, len(self.player.active_quests) - 3) if self.player else 0
                 self.quest_log_scroll = min(max_scroll, self.quest_log_scroll + 1)
-    
+
+    def handle_game_over_input(self, event):
+        if event.type == pygame.KEYDOWN:
+            if event.key == pygame.K_r:
+                # Restart game
+                self.player = None
+                self.state = GameState.NAME_INPUT
+                self.input_text = ""
+                self.create_initial_rooms()
+                self.create_story_quests()
+                self.show_notification("Game restarted!", 2)
+            elif event.key == pygame.K_ESCAPE:
+                self.running = False
+
     def update_player_movement(self):
         if not self.player: return
         
@@ -2462,12 +2486,19 @@ class Game:
                 self.handle_quest_log_input(event)
             elif self.state == GameState.SETTINGS:
                 self.handle_settings_input(event)
+            elif self.state == GameState.GAME_OVER:
+                self.handle_game_over_input(event)
     
     def update(self):
         if self.state == GameState.PLAYING:
             self.update_player_movement()
-            if self.player and self.player.current_room in self.rooms:
-                self.update_enemies()
+            if self.player:
+                # Update attack cooldown
+                if self.player.attack_cooldown > 0:
+                    self.player.attack_cooldown -= 1
+                
+                if self.player.current_room in self.rooms:
+                    self.update_enemies()
         elif self.state == GameState.COMBAT:
             self.update_combat()
         
@@ -2655,3 +2686,418 @@ class Game:
                     patrol_points.append((px, py))
                 
                 enemy.set_patrol_points(patrol_points)
+
+    def render(self):
+        """Main render method"""
+        self.screen.fill(BLACK)
+        
+        if self.state == GameState.NAME_INPUT:
+            self.render_name_input()
+        elif self.state == GameState.PLAYING:
+            self.render_game()
+        elif self.state == GameState.DIALOGUE:
+            self.render_game()
+            self.render_dialogue()
+        elif self.state == GameState.INVENTORY:
+            self.render_game()
+            self.render_inventory()
+        elif self.state == GameState.QUEST_LOG:
+            self.render_game()
+            self.render_quest_log()
+        elif self.state == GameState.SETTINGS:
+            self.render_game()
+            self.render_settings()
+        elif self.state == GameState.COMBAT:
+            self.render_game()
+            self.render_combat()
+        elif self.state == GameState.GAME_OVER:
+            self.render_game_over()
+        
+        # Render notifications
+        if self.notification_timer > 0:
+            self.render_notification()
+        
+        pygame.display.flip()
+
+    def render_name_input(self):
+        """Render the name input screen"""
+        title_text = self.font_large.render("Procedural Adventure", True, ADVENTURE_GOLD)
+        title_rect = title_text.get_rect(center=(SCREEN_WIDTH // 2, SCREEN_HEIGHT // 4))
+        self.screen.blit(title_text, title_rect)
+        
+        prompt_text = self.font_medium.render("Enter your name:", True, WHITE)
+        prompt_rect = prompt_text.get_rect(center=(SCREEN_WIDTH // 2, SCREEN_HEIGHT // 2 - 50))
+        self.screen.blit(prompt_text, prompt_rect)
+        
+        # Input box
+        input_box = pygame.Rect(SCREEN_WIDTH // 2 - 150, SCREEN_HEIGHT // 2, 300, 40)
+        pygame.draw.rect(self.screen, WHITE, input_box, 2)
+        
+        text_surface = self.font_medium.render(self.input_text, True, WHITE)
+        self.screen.blit(text_surface, (input_box.x + 5, input_box.y + 5))
+        
+        instructions = self.font_small.render("Press Enter to start", True, LIGHT_GRAY)
+        inst_rect = instructions.get_rect(center=(SCREEN_WIDTH // 2, SCREEN_HEIGHT // 2 + 80))
+        self.screen.blit(instructions, inst_rect)
+
+    def render_game(self):
+        """Render the main game view"""
+        if not self.player or self.player.current_room not in self.rooms:
+            return
+        
+        current_room = self.rooms[self.player.current_room]
+        
+        # Render room tiles
+        for y in range(current_room.grid_height):
+            for x in range(current_room.grid_width):
+                tile_rect = pygame.Rect(x * TILE_SIZE, y * TILE_SIZE, TILE_SIZE, TILE_SIZE)
+                tile_type = current_room.grid[y][x]
+                
+                if tile_type == TileType.FLOOR:
+                    color = self.get_biome_floor_color(current_room.room_type)
+                elif tile_type == TileType.WALL:
+                    color = self.get_biome_wall_color(current_room.room_type)
+                elif tile_type == TileType.EXIT:
+                    color = QUEST_COLOR
+                elif tile_type == TileType.WATER:
+                    color = BLUE
+                elif tile_type == TileType.CHEST:
+                    color = ADVENTURE_BROWN
+                else:
+                    color = GRAY
+                
+                pygame.draw.rect(self.screen, color, tile_rect)
+                
+                # Add tile borders for visibility
+                pygame.draw.rect(self.screen, DARK_GRAY, tile_rect, 1)
+        
+        # Render items
+        for item in current_room.items:
+            if item.x is not None and item.y is not None:
+                item_rect = pygame.Rect(item.x * TILE_SIZE + 8, item.y * TILE_SIZE + 8, TILE_SIZE - 16, TILE_SIZE - 16)
+                color = SPECIAL_ITEM_COLOR if item.item_type == ItemType.KEY_ITEM else ITEM_COLOR
+                pygame.draw.ellipse(self.screen, color, item_rect)
+        
+        # Render NPCs
+        for npc in current_room.npcs:
+            pygame.draw.rect(self.screen, NPC_COLOR, npc.rect)
+            # Add a simple face
+            pygame.draw.circle(self.screen, WHITE, (npc.rect.centerx, npc.rect.centery - 5), 3)
+        
+        # Render enemies
+        for enemy in current_room.enemies:
+            enemy_color = RED if enemy.is_hit else self.get_enemy_color(enemy.enemy_type)
+            pygame.draw.rect(self.screen, enemy_color, enemy.rect)
+            
+            # Add health bar for enemies
+            if enemy.health < enemy.max_health:
+                health_bar_rect = pygame.Rect(enemy.rect.x, enemy.rect.y - 8, enemy.rect.width, 4)
+                pygame.draw.rect(self.screen, RED, health_bar_rect)
+                health_percent = enemy.health / enemy.max_health
+                health_fill = pygame.Rect(enemy.rect.x, enemy.rect.y - 8, int(enemy.rect.width * health_percent), 4)
+                pygame.draw.rect(self.screen, GREEN, health_fill)
+        
+        # Render player
+        pygame.draw.rect(self.screen, PLAYER_COLOR, self.player.rect)
+        # Add simple player direction indicator
+        pygame.draw.circle(self.screen, WHITE, (self.player.rect.centerx, self.player.rect.centery - 5), 2)
+        
+        # Render UI
+        self.render_ui()
+
+    def get_biome_floor_color(self, room_type: str):
+        """Get floor color based on room biome"""
+        colors = {
+            "cave": CAVE_FLOOR_COLOR,
+            "forest": FOREST_FLOOR_COLOR,
+            "dungeon": DUNGEON_FLOOR_COLOR,
+            "village": VILLAGE_FLOOR_COLOR,
+            "mountain": MOUNTAIN_FLOOR_COLOR,
+            "swamp": SWAMP_FLOOR_COLOR,
+            "ruins": RUINS_FLOOR_COLOR,
+            "clearing": CLEARING_FLOOR_COLOR
+        }
+        return colors.get(room_type, FLOOR_COLOR)
+
+    def get_biome_wall_color(self, room_type: str):
+        """Get wall color based on room biome"""
+        colors = {
+            "cave": CAVE_WALL_COLOR,
+            "forest": FOREST_WALL_COLOR,
+            "dungeon": DUNGEON_WALL_COLOR,
+            "village": VILLAGE_WALL_COLOR,
+            "mountain": MOUNTAIN_WALL_COLOR,
+            "swamp": SWAMP_WALL_COLOR,
+            "ruins": RUINS_WALL_COLOR,
+            "clearing": CLEARING_WALL_COLOR
+        }
+        return colors.get(room_type, WALL_COLOR)
+
+    def get_enemy_color(self, enemy_type: EnemyType):
+        """Get color for different enemy types"""
+        colors = {
+            EnemyType.SLIME: (50, 255, 50),    # Green
+            EnemyType.SKELETON: (200, 200, 200), # Gray
+            EnemyType.GOBLIN: (255, 100, 100),   # Red
+            EnemyType.BAT: (100, 50, 200),       # Purple
+            EnemyType.SPIDER: (50, 50, 50)       # Dark gray
+        }
+        return colors.get(enemy_type, RED)
+
+    def render_ui(self):
+        """Render the UI overlay"""
+        if not self.player:
+            return
+        
+        # Health bar
+        health_bar_bg = pygame.Rect(10, 10, 200, 20)
+        pygame.draw.rect(self.screen, DARK_GRAY, health_bar_bg)
+        
+        health_percent = self.player.health / self.player.max_health
+        health_bar_fill = pygame.Rect(10, 10, int(200 * health_percent), 20)
+        health_color = GREEN if health_percent > 0.5 else (255, int(255 * health_percent * 2), 0)
+        pygame.draw.rect(self.screen, health_color, health_bar_fill)
+        
+        health_text = self.font_small.render(f"HP: {self.player.health}/{self.player.max_health}", True, WHITE)
+        self.screen.blit(health_text, (15, 12))
+        
+        # Room name
+        room_text = self.font_small.render(f"Location: {self.player.current_room}", True, WHITE)
+        self.screen.blit(room_text, (10, 40))
+        
+        # Gold
+        gold_text = self.font_small.render(f"Gold: {self.player.gold}", True, ADVENTURE_GOLD)
+        self.screen.blit(gold_text, (10, 60))
+        
+        # Level and XP
+        level_text = self.font_small.render(f"Level: {self.player.level} XP: {self.player.experience}", True, WHITE)
+        self.screen.blit(level_text, (10, 80))
+        
+        # Controls reminder
+        controls_text = self.font_tiny.render("E: Interact | I: Inventory | Q: Quests | H: Health Potion | TAB: Settings", True, LIGHT_GRAY)
+        self.screen.blit(controls_text, (10, SCREEN_HEIGHT - 25))
+
+    def render_dialogue(self):
+        """Render dialogue interface"""
+        # Background
+        dialogue_bg = pygame.Rect(50, SCREEN_HEIGHT - 200, SCREEN_WIDTH - 100, 150)
+        pygame.draw.rect(self.screen, UI_BG_COLOR, dialogue_bg)
+        pygame.draw.rect(self.screen, UI_BORDER_COLOR, dialogue_bg, 3)
+        
+        # NPC name
+        if self.dialogue_target_npc:
+            name_text = self.font_medium.render(self.dialogue_target_npc.name, True, NPC_COLOR)
+            self.screen.blit(name_text, (60, SCREEN_HEIGHT - 190))
+        
+        # Dialogue text
+        dialogue_lines = self.wrap_text(self.dialogue_text, self.font_small, SCREEN_WIDTH - 120)
+        y_offset = SCREEN_HEIGHT - 160
+        for line in dialogue_lines[:3]:  # Show max 3 lines
+            text_surface = self.font_small.render(line, True, WHITE)
+            self.screen.blit(text_surface, (60, y_offset))
+            y_offset += 25
+        
+        # Choices
+        choice_y = SCREEN_HEIGHT - 90
+        for i, choice in enumerate(self.dialogue_choices):
+            color = QUEST_COLOR if i == self.selected_choice_idx else WHITE
+            choice_text = self.font_small.render(f"> {choice}", True, color)
+            self.screen.blit(choice_text, (60, choice_y))
+            choice_y += 20
+
+    def render_inventory(self):
+        """Render inventory interface"""
+        # Background
+        inv_bg = pygame.Rect(200, 100, 400, 300)
+        pygame.draw.rect(self.screen, UI_BG_COLOR, inv_bg)
+        pygame.draw.rect(self.screen, UI_BORDER_COLOR, inv_bg, 3)
+        
+        # Title
+        title_text = self.font_medium.render("Inventory", True, WHITE)
+        self.screen.blit(title_text, (210, 110))
+        
+        # Items
+        y_offset = 150
+        if self.player.inventory:
+            for item in self.player.inventory:
+                item_text = f"{item.name} x{item.quantity}"
+                if item.value > 0:
+                    item_text += f" ({item.value}g)"
+                
+                color = SPECIAL_ITEM_COLOR if item.item_type == ItemType.KEY_ITEM else WHITE
+                text_surface = self.font_small.render(item_text, True, color)
+                self.screen.blit(text_surface, (210, y_offset))
+                y_offset += 25
+                
+                if y_offset > 380:  # Don't overflow the box
+                    break
+        else:
+            empty_text = self.font_small.render("Empty", True, GRAY)
+            self.screen.blit(empty_text, (210, y_offset))
+        
+        # Instructions
+        inst_text = self.font_tiny.render("Press H to use Health Potions, ESC to close", True, LIGHT_GRAY)
+        self.screen.blit(inst_text, (210, 380))
+
+    def render_quest_log(self):
+        """Render quest log interface"""
+        # Background
+        quest_bg = pygame.Rect(150, 80, 500, 350)
+        pygame.draw.rect(self.screen, UI_BG_COLOR, quest_bg)
+        pygame.draw.rect(self.screen, UI_BORDER_COLOR, quest_bg, 3)
+        
+        # Title
+        title_text = self.font_medium.render("Quest Log", True, QUEST_COLOR)
+        self.screen.blit(title_text, (160, 90))
+        
+        # Active quests
+        y_offset = 120
+        if self.player and self.player.active_quests:
+            for quest_id in self.player.active_quests:
+                if quest_id in self.quests:
+                    quest = self.quests[quest_id]
+                    
+                    # Quest title
+                    title = self.font_small.render(quest.title, True, QUEST_COLOR)
+                    self.screen.blit(title, (160, y_offset))
+                    y_offset += 25
+                    
+                    # Quest description
+                    desc_lines = self.wrap_text(quest.description, self.font_tiny, 480)
+                    for line in desc_lines[:2]:
+                        desc_surface = self.font_tiny.render(line, True, WHITE)
+                        self.screen.blit(desc_surface, (170, y_offset))
+                        y_offset += 18
+                    
+                    # Objectives
+                    for i, objective in enumerate(quest.objectives):
+                        status = "✓" if quest.completed_objectives[i] else "○"
+                        obj_text = f"  {status} {objective}"
+                        color = GREEN if quest.completed_objectives[i] else WHITE
+                        obj_surface = self.font_tiny.render(obj_text, True, color)
+                        self.screen.blit(obj_surface, (170, y_offset))
+                        y_offset += 18
+                    
+                    y_offset += 10  # Space between quests
+                    
+                    if y_offset > 400:  # Don't overflow
+                        break
+        else:
+            no_quests_text = self.font_small.render("No active quests", True, GRAY)
+            self.screen.blit(no_quests_text, (160, y_offset))
+        
+        # Instructions
+        inst_text = self.font_tiny.render("ESC to close", True, LIGHT_GRAY)
+        self.screen.blit(inst_text, (160, 410))
+
+    def render_settings(self):
+        """Render settings interface"""
+        # Background
+        settings_bg = pygame.Rect(300, 150, 300, 250)
+        pygame.draw.rect(self.screen, UI_BG_COLOR, settings_bg)
+        pygame.draw.rect(self.screen, UI_BORDER_COLOR, settings_bg, 3)
+        
+        # Title
+        title_text = self.font_medium.render("Settings", True, WHITE)
+        self.screen.blit(title_text, (310, 160))
+        
+        # Settings options
+        y_offset = 190
+        for i, option in enumerate(self.settings_options):
+            color = QUEST_COLOR if i == self.settings_selection else WHITE
+            
+            if option == "Master Volume":
+                text = f"Master Volume: {self.settings.master_volume:.1f}"
+            elif option == "SFX Volume":
+                text = f"SFX Volume: {self.settings.sfx_volume:.1f}"
+            elif option == "Music Volume":
+                text = f"Music Volume: {self.settings.music_volume:.1f}"
+            elif option == "Screen Scale":
+                text = f"Screen Scale: {self.settings.screen_scale:.1f}x"
+            elif option == "Fullscreen":
+                text = f"Fullscreen: {'On' if self.settings.fullscreen else 'Off'}"
+            else:
+                text = option
+            
+            option_surface = self.font_small.render(text, True, color)
+            self.screen.blit(option_surface, (310, y_offset))
+            y_offset += 25
+        
+        # Instructions
+        inst_text = self.font_tiny.render("Arrow keys to navigate, Enter to select", True, LIGHT_GRAY)
+        self.screen.blit(inst_text, (310, 380))
+
+    def render_combat(self):
+        """Render combat interface"""
+        if hasattr(self, 'combat_enemy') and self.combat_enemy:
+            combat_text = self.font_medium.render("COMBAT!", True, RED)
+            text_rect = combat_text.get_rect(center=(SCREEN_WIDTH // 2, 50))
+            self.screen.blit(combat_text, text_rect)
+
+    def render_game_over(self):
+        """Render game over screen"""
+        self.screen.fill(BLACK)
+        
+        game_over_text = self.font_large.render("GAME OVER", True, RED)
+        text_rect = game_over_text.get_rect(center=(SCREEN_WIDTH // 2, SCREEN_HEIGHT // 2 - 50))
+        self.screen.blit(game_over_text, text_rect)
+        
+        restart_text = self.font_medium.render("Press R to restart or ESC to quit", True, WHITE)
+        restart_rect = restart_text.get_rect(center=(SCREEN_WIDTH // 2, SCREEN_HEIGHT // 2 + 50))
+        self.screen.blit(restart_text, restart_rect)
+
+    def render_notification(self):
+        """Render notification overlay"""
+        if self.notification_text:
+            # Background
+            text_surface = self.font_small.render(self.notification_text, True, WHITE)
+            text_rect = text_surface.get_rect()
+            
+            notification_bg = pygame.Rect(
+                SCREEN_WIDTH // 2 - text_rect.width // 2 - 10,
+                100,
+                text_rect.width + 20,
+                text_rect.height + 10
+            )
+            
+            pygame.draw.rect(self.screen, TOOLTIP_BG, notification_bg)
+            pygame.draw.rect(self.screen, WHITE, notification_bg, 2)
+            
+            # Text
+            text_pos = (SCREEN_WIDTH // 2 - text_rect.width // 2, 105)
+            self.screen.blit(text_surface, text_pos)
+
+    def wrap_text(self, text: str, font, max_width: int) -> List[str]:
+        """Wrap text to fit within max_width"""
+        words = text.split(' ')
+        lines = []
+        current_line = ""
+        
+        for word in words:
+            test_line = current_line + " " + word if current_line else word
+            if font.size(test_line)[0] <= max_width:
+                current_line = test_line
+            else:
+                if current_line:
+                    lines.append(current_line)
+                current_line = word
+        
+        if current_line:
+            lines.append(current_line)
+        
+        return lines
+
+    def run(self):
+        """Main game loop"""
+        while self.running:
+            self.handle_events()
+            self.update()
+            self.render()
+            self.clock.tick(FPS)
+        
+        pygame.quit()
+
+# Main entry point
+if __name__ == "__main__":
+    game = Game()
+    game.run()

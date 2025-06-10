@@ -1765,6 +1765,35 @@ class Room:
             npc.rect.topleft = (npc_tile_x * TILE_SIZE, npc_tile_y * TILE_SIZE)
             self.npcs.append(npc)
 
+    def add_enemy(self, enemy: Enemy):
+        """Add an enemy to the room, placing it on a random floor tile"""
+        possible_locations = []
+        for r_idx, row in enumerate(self.grid):
+            for c_idx, tile in enumerate(row):
+                if tile == TileType.FLOOR:
+                    occupied = False
+                    # Check against items
+                    for existing_item in self.items:
+                        if existing_item.x == c_idx and existing_item.y == r_idx:
+                            occupied = True; break
+                    if occupied: continue
+                    # Check against NPCs
+                    for existing_npc in self.npcs:
+                        if existing_npc.rect.colliderect(pygame.Rect(c_idx * TILE_SIZE, r_idx * TILE_SIZE, TILE_SIZE, TILE_SIZE)):
+                            occupied = True; break
+                    if occupied: continue
+                    # Check against other enemies
+                    for existing_enemy in self.enemies:
+                        if existing_enemy.rect.colliderect(pygame.Rect(c_idx * TILE_SIZE, r_idx * TILE_SIZE, TILE_SIZE, TILE_SIZE)):
+                            occupied = True; break
+                    if not occupied:
+                        possible_locations.append((c_idx, r_idx))
+        
+        if possible_locations:
+            enemy_tile_x, enemy_tile_y = random.choice(possible_locations)
+            enemy.rect.topleft = (enemy_tile_x * TILE_SIZE, enemy_tile_y * TILE_SIZE)
+            self.enemies.append(enemy)
+
     def to_dict(self):
         return {
             'name': self.name,
@@ -1775,6 +1804,7 @@ class Room:
             'grid': [[tile.value for tile in row] for row in self.grid],
             'items': [item.to_dict() for item in self.items],
             'npcs': [npc.to_dict() for npc in self.npcs],
+            'enemies': [enemy.to_dict() for enemy in self.enemies],
             'exits': self.exits,
             'visited': self.visited
         }
@@ -1787,6 +1817,7 @@ class Room:
         room.grid = [[TileType(tile_val) for tile_val in row] for row in data['grid']]
         room.items = [Item.from_dict(item_data) for item_data in data.get('items', [])]
         room.npcs = [NPC.from_dict(npc_data) for npc_data in data.get('npcs', [])]
+        room.enemies = [Enemy.from_dict(enemy_data) for enemy_data in data.get('enemies', [])]
         room.exits = data.get('exits', {})
         room.visited = data.get('visited', False)
         room.difficulty_level = data.get('difficulty_level', 1)
@@ -1820,7 +1851,7 @@ class Game:
         self.clock = pygame.time.Clock()
         self.running = True
         
-        self.state = GameState.NAME_INPUT
+        self.state = GameState.TITLE_SCREEN
         self.player: Optional[Player] = None
         self.rooms: Dict[str, Room] = {}
         self.quests: Dict[str, Quest] = {}  # All available quests
@@ -1840,6 +1871,10 @@ class Game:
         self.dialogue_choices: List[str] = []
         self.selected_choice_idx = 0
         self.quest_log_scroll = 0  # For scrolling through quest log
+        
+        # Menu navigation state
+        self.menu_selected_index = 0  # Currently selected menu option
+        self.menu_options = ["Resume", "Settings", "Save Game", "Load Game", "Quit"]
         
         # Settings menu state
         self.settings_selection = 0
@@ -1941,6 +1976,9 @@ class Game:
         # Add procedural NPCs occasionally
         if random.random() < 0.3:  # 30% chance for NPC
             self.add_procedural_npc(room, room_type)
+        
+        # Add procedural enemies based on difficulty and room type
+        self.add_procedural_enemies(room, room_type, difficulty)
         
         return room
     
@@ -2154,6 +2192,41 @@ class Game:
 
         bandit_camp.exits["south"] = ("Merchant Quarter", GRID_WIDTH // 2, 1)
         self.place_exit_tile(bandit_camp, "south", GRID_HEIGHT - 1, GRID_WIDTH // 2)
+
+        # Add enemies to initial rooms
+        # Start room - just a few weak enemies
+        slime1 = Enemy(EnemyType.SLIME, pygame.Rect(0, 0, TILE_SIZE, TILE_SIZE), 8)
+        start_room.add_enemy(slime1)
+        
+        # Crystal Chamber - moderate enemies
+        bat1 = Enemy(EnemyType.BAT, pygame.Rect(0, 0, TILE_SIZE, TILE_SIZE), 6)
+        bat1.behavior = EnemyBehavior.PATROL
+        crystal_chamber.add_enemy(bat1)
+        spider1 = Enemy(EnemyType.SPIDER, pygame.Rect(0, 0, TILE_SIZE, TILE_SIZE), 10)
+        spider1.behavior = EnemyBehavior.LURK
+        crystal_chamber.add_enemy(spider1)
+        
+        # Underground Tunnels - tougher enemies
+        skeleton1 = Enemy(EnemyType.SKELETON, pygame.Rect(0, 0, TILE_SIZE, TILE_SIZE), 15)
+        underground_tunnels.add_enemy(skeleton1)
+        goblin1 = Enemy(EnemyType.GOBLIN, pygame.Rect(0, 0, TILE_SIZE, TILE_SIZE), 12)
+        underground_tunnels.add_enemy(goblin1)
+        
+        # Lost City - stronger enemies
+        skeleton2 = Enemy(EnemyType.SKELETON, pygame.Rect(0, 0, TILE_SIZE, TILE_SIZE), 18)
+        lost_city.add_enemy(skeleton2)
+        spider2 = Enemy(EnemyType.SPIDER, pygame.Rect(0, 0, TILE_SIZE, TILE_SIZE), 12)
+        spider2.behavior = EnemyBehavior.LURK
+        lost_city.add_enemy(spider2)
+        goblin2 = Enemy(EnemyType.GOBLIN, pygame.Rect(0, 0, TILE_SIZE, TILE_SIZE), 14)
+        lost_city.add_enemy(goblin2)
+        
+        # Bandit Camp - aggressive enemies
+        goblin3 = Enemy(EnemyType.GOBLIN, pygame.Rect(0, 0, TILE_SIZE, TILE_SIZE), 16)
+        goblin3.behavior = EnemyBehavior.AGGRESSIVE
+        bandit_camp.add_enemy(goblin3)
+        skeleton3 = Enemy(EnemyType.SKELETON, pygame.Rect(0, 0, TILE_SIZE, TILE_SIZE), 20)
+        bandit_camp.add_enemy(skeleton3)
 
         self.rooms = {
             "Mystic Cave Entrance": start_room,
@@ -2692,8 +2765,7 @@ class Game:
             
             # Instructions
             instruction_text = self.font_tiny.render("Press SPACE or ENTER to continue", True, LIGHT_GRAY)
-            instruction_rect = instruction_text.get_rect()
-            instruction_rect.bottomright = (dialogue_box.right - 10, dialogue_box.bottom - 10)
+            instruction_rect = instruction_text.get_rect(center=(SCREEN_WIDTH//2, SCREEN_HEIGHT//2 + 80))
             self.screen.blit(instruction_text, instruction_rect)
             
             # Show relationship level if it's not neutral
@@ -2739,132 +2811,67 @@ class Game:
             self.screen.blit(line_surface, (rect.x, rect.y + y_offset))
             y_offset += font.get_height() + 2
 
-    def run(self):
-        """Main game loop"""
-        while self.running:
-            # Handle events
-            for event in pygame.event.get():
-                if event.type == pygame.QUIT:
-                    self.running = False
-                    
-                elif event.type == pygame.KEYDOWN:
-                    if event.key == pygame.K_ESCAPE:
-                        if self.state == GameState.PLAYING:
-                            self.state = GameState.MENU
-                        elif self.state == GameState.MENU:
-                            self.state = GameState.PLAYING
-                        else:
-                            self.state = GameState.PLAYING
-                    
-                    elif self.state == GameState.NAME_INPUT:
-                        if event.key == pygame.K_RETURN:
-                            if self.input_text.strip():
-                                # Create player
-                                self.player = Player(
-                                    name=self.input_text.strip(),
-                                    rect=pygame.Rect(SCREEN_WIDTH//2, SCREEN_HEIGHT//2, TILE_SIZE, TILE_SIZE),
-                                    current_room="Mystic Cave Entrance"
-                                )
-                                self.state = GameState.PLAYING
-                                self.show_notification(f"Welcome, {self.player.name}!", 3)
-                        elif event.key == pygame.K_BACKSPACE:
-                            self.input_text = self.input_text[:-1]
-                        else:
-                            if len(self.input_text) < 20:
-                                self.input_text += event.unicode
-                    
-                    elif self.state == GameState.PLAYING:
-                        if event.key == pygame.K_SPACE:
-                            self.handle_npc_interaction()
-                    
-                    elif self.state == GameState.DIALOGUE:
-                        if event.key == pygame.K_SPACE or event.key == pygame.K_RETURN:
-                            self.end_dialogue()
-                    
-                elif event.type == pygame.TEXTINPUT and self.state == GameState.NAME_INPUT:
-                    if event.text != '\r' and event.text != '\b':  # Ignore enter and backspace
-                        if len(self.input_text) < 20:
-                            self.input_text += event.text
-            
-            # Update game state
-            if self.state == GameState.PLAYING and self.player:
-                keys = pygame.key.get_pressed()
-                self.update_player_movement(keys)
-                
-                # Update current room entities
-                current_room = self.rooms[self.player.current_room]
-                game_ticks = pygame.time.get_ticks()
-                
-                # Update NPCs
-                for npc in current_room.npcs:
-                    npc.update_behavior(game_ticks)
-                
-                # Update enemies
-                for enemy in current_room.enemies:
-                    enemy.update_behavior(self.player.rect)
-                    enemy.update_movement(self.player.rect, self.check_wall_collision)
-            
-            # Render based on state
-            if self.state == GameState.NAME_INPUT:
-                self.render_name_input()
-            elif self.state == GameState.PLAYING:
-                self.render_game()
-            elif self.state == GameState.MENU:
-                self.render_menu()
-            elif self.state == GameState.DIALOGUE:
-                self.render_dialogue()
-            
-            pygame.display.flip()
-            self.clock.tick(FPS)
-        
-        pygame.quit()
-        sys.exit()
-
-    def render_name_input(self):
-        """Render the name input screen"""
+    def render_title_screen(self):
+        """Render the main title screen with quest tooltip"""
+        # Create a gradient background
         self.screen.fill(UI_BG_COLOR)
         
-        title_text = self.font_large.render("Procedural Adventure", True, WHITE)
-        title_rect = title_text.get_rect(center=(SCREEN_WIDTH//2, SCREEN_HEIGHT//2 - 100))
+        # Add some atmospheric particles or effects
+        for i in range(20):
+            x = random.randint(0, SCREEN_WIDTH)
+            y = random.randint(0, SCREEN_HEIGHT)
+            size = random.randint(1, 3)
+            alpha = random.randint(50, 150)
+            color = (*QUEST_COLOR, alpha)
+            s = pygame.Surface((size*2, size*2), pygame.SRCALPHA)
+            pygame.draw.circle(s, color, (size, size), size)
+            self.screen.blit(s, (x, y))
+        
+        # Main title
+        title_text = self.font_large.render("Procedural Adventure", True, QUEST_COLOR)
+        title_rect = title_text.get_rect(center=(SCREEN_WIDTH//2, SCREEN_HEIGHT//2 - 120))
         self.screen.blit(title_text, title_rect)
         
-        prompt_text = self.font_medium.render("Enter your name:", True, WHITE)
-        prompt_rect = prompt_text.get_rect(center=(SCREEN_WIDTH//2, SCREEN_HEIGHT//2 - 30))
-        self.screen.blit(prompt_text, prompt_rect)
+        # Subtitle
+        subtitle_text = self.font_medium.render("Explore Infinite Dungeons & Mysteries", True, WHITE)
+        subtitle_rect = subtitle_text.get_rect(center=(SCREEN_WIDTH//2, SCREEN_HEIGHT//2 - 70))
+        self.screen.blit(subtitle_text, subtitle_rect)
         
-        # Input box
-        input_rect = pygame.Rect(SCREEN_WIDTH//2 - 150, SCREEN_HEIGHT//2, 300, 40)
-        pygame.draw.rect(self.screen, WHITE, input_rect)
-        pygame.draw.rect(self.screen, BLACK, input_rect, 2)
+        # Quest tooltip box
+        tooltip_width = 400
+        tooltip_height = 150
+        tooltip_x = SCREEN_WIDTH//2 - tooltip_width//2
+        tooltip_y = SCREEN_HEIGHT//2 - 20
+        tooltip_rect = pygame.Rect(tooltip_x, tooltip_y, tooltip_width, tooltip_height)
         
-        # Input text
-        input_surface = self.font_medium.render(self.input_text, True, BLACK)
-        self.screen.blit(input_surface, (input_rect.x + 5, input_rect.y + 5))
+        # Draw tooltip background
+        pygame.draw.rect(self.screen, TOOLTIP_BG, tooltip_rect)
+        pygame.draw.rect(self.screen, QUEST_COLOR, tooltip_rect, 2)
         
-        # Instructions
-        instruction_text = self.font_small.render("Press ENTER to start", True, WHITE)
-        instruction_rect = instruction_text.get_rect(center=(SCREEN_WIDTH//2, SCREEN_HEIGHT//2 + 80))
-        self.screen.blit(instruction_text, instruction_rect)
-
-    def render_menu(self):
-        """Render the pause menu"""
-        # Draw game background faded
-        self.render_game()
-        overlay = pygame.Surface((SCREEN_WIDTH, SCREEN_HEIGHT))
-        overlay.set_alpha(128)
-        overlay.fill(BLACK)
-        self.screen.blit(overlay, (0, 0))
+        # Quest tooltip title
+        quest_title = self.font_medium.render("Your Quest Awaits", True, QUEST_COLOR)
+        quest_title_rect = quest_title.get_rect(center=(SCREEN_WIDTH//2, tooltip_y + 25))
+        self.screen.blit(quest_title, quest_title_rect)
         
-        # Menu options
-        menu_options = ["Resume", "Settings", "Save Game", "Load Game", "Quit"]
-        menu_y_start = SCREEN_HEIGHT // 2 - (len(menu_options) * 30) // 2
+        # Quest description
+        quest_lines = [
+            "Explore mystical caves filled with ancient secrets",
+            "Battle dangerous creatures and collect treasures",
+            "Uncover the mysteries of the Lost City of Aethermoor",
+            "Your adventure begins in the Mystic Cave Entrance..."
+        ]
         
-        for i, option in enumerate(menu_options):
-            color = WHITE
-            text = self.font_medium.render(option, True, color)
-            text_rect = text.get_rect(center=(SCREEN_WIDTH//2, menu_y_start + i * 50))
-            self.screen.blit(text, text_rect)
-
-if __name__ == "__main__":
-    game = Game()
-    game.run()
+        for i, line in enumerate(quest_lines):
+            line_text = self.font_small.render(line, True, WHITE)
+            line_rect = line_text.get_rect(center=(SCREEN_WIDTH//2, tooltip_y + 55 + i * 20))
+            self.screen.blit(line_text, line_rect)
+        
+        # Start instructions
+        start_text = self.font_medium.render("Press ENTER or SPACE to Begin", True, WHITE)
+        start_rect = start_text.get_rect(center=(SCREEN_WIDTH//2, SCREEN_HEIGHT//2 + 160))
+        self.screen.blit(start_text, start_rect)
+        
+        # Exit instructions
+        exit_text = self.font_small.render("Press ESC to Exit", True, LIGHT_GRAY)
+        exit_rect = exit_text.get_rect(center=(SCREEN_WIDTH//2, SCREEN_HEIGHT//2 + 190))
+        self.screen.blit(exit_text, exit_rect)
